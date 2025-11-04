@@ -1,5 +1,6 @@
 use crate::acse::{AarqApdu, AareApdu};
 use crate::hdlc::{HdlcFrame, HdlcFrameError};
+use crate::security::SecurityError;
 use crate::transport::Transport;
 use heapless::Vec;
 
@@ -8,6 +9,7 @@ pub enum ServerError<E> {
     HdlcError(HdlcFrameError),
     AcseError,
     TransportError(E),
+    SecurityError(SecurityError),
 }
 
 impl<E> From<HdlcFrameError> for ServerError<E> {
@@ -46,13 +48,13 @@ impl<T: Transport> Server<T> {
         loop {
             let request_bytes = self.transport.receive().map_err(ServerError::TransportError)?;
             let decrypted_request = if let Some(key) = &self.key {
-                hls_decrypt(&request_bytes, key)
+                hls_decrypt(&request_bytes, key).map_err(ServerError::SecurityError)?
             } else {
                 request_bytes
             };
             let response_bytes = self.handle_request(&decrypted_request)?;
             let encrypted_response = if let Some(key) = &self.key {
-                hls_encrypt(&response_bytes, key)
+                hls_encrypt(&response_bytes, key).map_err(ServerError::SecurityError)?
             } else {
                 response_bytes
             };
@@ -90,11 +92,15 @@ impl<T: Transport> Server<T> {
                         .as_ref()
                         .unwrap()
                         .as_slice();
-                    let expected_response = lls_authenticate(password, challenge);
-                    if auth_value == expected_response {
-                        aare.result = 0; // success
-                    } else {
-                        aare.result = 1; // failure
+                    match lls_authenticate(password, challenge) {
+                        Ok(expected_response) => {
+                            if auth_value == expected_response {
+                                aare.result = 0; // success
+                            } else {
+                                aare.result = 1; // failure
+                            }
+                        }
+                        Err(_) => aare.result = 1, // failure
                     }
                 } else {
                     let challenge: Vec<u8, 32> = Vec::from_slice(b"challenge").unwrap();
