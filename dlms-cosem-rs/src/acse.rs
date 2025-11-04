@@ -12,7 +12,7 @@ pub struct AarqApdu {
     pub application_context_name: Vec<u8, MAX_PDU_SIZE>,
     pub sender_acse_requirements: u8,
     pub mechanism_name: Option<Vec<u8, MAX_PDU_SIZE>>,
-    pub calling_authentication_value: Option<Vec<u8, MAX_PDU_SIZE>>,
+    pub calling_authentication_value: Option<Vec<u8, 32>>,
     pub user_information: Vec<u8, MAX_PDU_SIZE>,
 }
 
@@ -58,31 +58,53 @@ impl AarqApdu {
     pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
         let (i, _aarq_tag) = tag(&[0x60])(bytes)?;
         let (i, len) = take(1usize)(i)?;
-        let (mut i, _content) = take(len[0])(i)?;
+        let (i, content) = take(len[0])(i)?;
 
-        let (i, _acn_tag) = tag(&[0xA1])(i)?;
-        let (i, acn_len) = take(1usize)(i)?;
-        let (i, acn) = take(acn_len[0])(i)?;
+        let (content, _acn_tag) = tag([0xA1])(content)?;
+        let (content, acn_len) = take(1usize)(content)?;
+        let (content, acn) = take(acn_len[0])(content)?;
 
-        let (i, _sar_tag) = tag(&[0x8A])(i)?;
-        let (i, _sar_len) = take(1usize)(i)?;
-        let (i, sar) = take(1usize)(i)?;
+        let (content, _sar_tag) = tag([0x8A])(content)?;
+        let (content, _sar_len) = take(1usize)(content)?;
+        let (content, sar) = take(1usize)(content)?;
+
+        let (content, mn) = opt(tuple((
+            tag([0x8B]),
+            take(1usize),
+            take(1usize),
+        )))(content)?;
+
+        let (content, cav) = opt(tuple((
+            tag([0xAC]),
+            take(1usize),
+            take(1usize),
+        )))(content)?;
+
+        let (content, _ui_tag) = tag([0xBE])(content)?;
+        let (content, ui_len) = take(1usize)(content)?;
+        let (_content, ui) = take(ui_len[0])(content)?;
 
         let mut aarq = AarqApdu {
-            application_context_name: Vec::new(),
+            application_context_name: Vec::from_slice(acn).unwrap(),
             sender_acse_requirements: sar[0],
             mechanism_name: None,
             calling_authentication_value: None,
-            user_information: Vec::new(),
+            user_information: Vec::from_slice(ui).unwrap(),
         };
-        aarq.application_context_name.extend_from_slice(acn).unwrap();
-        aarq.user_information.extend_from_slice(b"user_info").unwrap();
 
+        if let Some((_, mn_len, mn_val)) = mn {
+            let len = u8::from_be_bytes(mn_len[0].to_be_bytes());
+            let (mn_val, _) = take(len)(mn_val)?;
+            aarq.mechanism_name = Some(Vec::from_slice(mn_val).unwrap());
+        }
 
-        Ok((
-            i,
-            aarq,
-        ))
+        if let Some((_, cav_len, cav_val)) = cav {
+            let len = u8::from_be_bytes(cav_len[0].to_be_bytes());
+            let (cav_val, _) = take(len)(cav_val)?;
+            aarq.calling_authentication_value = Some(Vec::from_slice(cav_val).unwrap());
+        }
+
+        Ok((i, aarq))
     }
 }
 
@@ -91,7 +113,7 @@ pub struct AareApdu {
     pub application_context_name: Vec<u8, MAX_PDU_SIZE>,
     pub result: u8,
     pub result_source_diagnostic: u8,
-    pub responding_authentication_value: Option<Vec<u8, MAX_PDU_SIZE>>,
+    pub responding_authentication_value: Option<Vec<u8, 32>>,
     pub user_information: Vec<u8, MAX_PDU_SIZE>,
 }
 
@@ -134,34 +156,57 @@ impl AareApdu {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
-        let (i, _aare_tag) = tag(&[0x61])(bytes)?;
+        let (i, _aare_tag) = tag([0x61])(bytes)?;
         let (i, len) = take(1usize)(i)?;
-        let (i, _content) = take(len[0])(i)?;
+        let (i, content) = take(len[0])(i)?;
 
-        // For now, just return a dummy AareApdu
+        let (content, _acn_tag) = tag([0xA1])(content)?;
+        let (content, acn_len) = take(1usize)(content)?;
+        let (content, acn) = take(acn_len[0])(content)?;
+
+        let (content, _res_tag) = tag([0xA2])(content)?;
+        let (content, _res_len) = take(1usize)(content)?;
+        let (content, res) = take(1usize)(content)?;
+
+        let (content, _rsd_tag) = tag([0xA3])(content)?;
+        let (content, _rsd_len) = take(1usize)(content)?;
+        let (content, rsd) = take(1usize)(content)?;
+
+        let (content, rav) = opt(tuple((
+            tag([0xAC]),
+            take(1usize),
+            take(1usize),
+        )))(content)?;
+
+        let (content, _ui_tag) = tag([0xBE])(content)?;
+        let (content, ui_len) = take(1usize)(content)?;
+        let (_content, ui) = take(ui_len[0])(content)?;
+
         let mut aare = AareApdu {
-            application_context_name: Vec::new(),
-            result: 0,
-            result_source_diagnostic: 0,
+            application_context_name: Vec::from_slice(acn).unwrap(),
+            result: res[0],
+            result_source_diagnostic: rsd[0],
             responding_authentication_value: None,
-            user_information: Vec::new(),
+            user_information: Vec::from_slice(ui).unwrap(),
         };
-        aare.application_context_name.extend_from_slice(b"LN_WITH_NO_CIPHERING").unwrap();
-        aare.user_information.extend_from_slice(b"user_info").unwrap();
 
-        Ok((
-            i,
-            aare,
-        ))
+        if let Some((_, rav_len, rav_val)) = rav {
+            let len = u8::from_be_bytes(rav_len[0].to_be_bytes());
+            let (rav_val, _) = take(len)(rav_val)?;
+            aare.responding_authentication_value = Some(Vec::from_slice(rav_val).unwrap());
+        }
+
+        Ok((i, aare))
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
+    extern crate std;
     use super::*;
 
     #[test]
-    fn test_aarq_apdu_serialization() {
+    fn test_aarq_apdu_serialization_deserialization() {
         let mut aarq = AarqApdu {
             application_context_name: Vec::new(),
             sender_acse_requirements: 0,
@@ -169,11 +214,17 @@ mod tests {
             calling_authentication_value: None,
             user_information: Vec::new(),
         };
-        aarq.application_context_name.extend_from_slice(b"LN_WITH_NO_CIPHERING").unwrap();
-        aarq.user_information.extend_from_slice(b"user_info").unwrap();
+        aarq.application_context_name
+            .extend_from_slice(b"LN_WITH_NO_CIPHERING")
+            .unwrap();
+        aarq.user_information
+            .extend_from_slice(b"user_info")
+            .unwrap();
 
         let bytes = aarq.to_bytes();
-        assert!(!bytes.is_empty());
+        let aarq2 = AarqApdu::from_bytes(&bytes).unwrap().1;
+
+        assert_eq!(aarq, aarq2);
     }
 
     #[test]
@@ -195,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn test_aare_apdu_serialization() {
+    fn test_aare_apdu_serialization_deserialization() {
         let mut aare = AareApdu {
             application_context_name: Vec::new(),
             result: 0,
@@ -203,11 +254,16 @@ mod tests {
             responding_authentication_value: None,
             user_information: Vec::new(),
         };
-        aare.application_context_name.extend_from_slice(b"LN_WITH_NO_CIPHERING").unwrap();
-        aare.user_information.extend_from_slice(b"user_info").unwrap();
+        aare.application_context_name
+            .extend_from_slice(b"LN_WITH_NO_CIPHERING")
+            .unwrap();
+        aare.user_information
+            .extend_from_slice(b"user_info")
+            .unwrap();
 
         let bytes = aare.to_bytes();
-        assert!(!bytes.is_empty());
+        let aare2 = AareApdu::from_bytes(&bytes).unwrap().1;
+        assert_eq!(aare, aare2);
     }
 
     #[test]
