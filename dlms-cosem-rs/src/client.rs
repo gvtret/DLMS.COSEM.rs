@@ -1,5 +1,6 @@
 use crate::acse::{AarqApdu, AareApdu};
 use crate::hdlc::{HdlcFrame, HdlcFrameError};
+use crate::security::SecurityError;
 use crate::transport::Transport;
 use crate::xdlms::{GetRequest, GetResponse};
 use heapless::Vec;
@@ -9,6 +10,7 @@ pub enum ClientError<E> {
     HdlcError(HdlcFrameError),
     AcseError,
     TransportError(E),
+    SecurityError(SecurityError),
 }
 
 impl<E> From<HdlcFrameError> for ClientError<E> {
@@ -78,7 +80,8 @@ impl<T: Transport> Client<T> {
             &self.password,
             aare.responding_authentication_value.as_ref(),
         ) {
-            let response = lls_authenticate(password, challenge);
+            let response =
+                lls_authenticate(password, challenge).map_err(ClientError::SecurityError)?;
             let mut aarq = AarqApdu {
                 application_context_name: Vec::new(),
                 sender_acse_requirements: 0,
@@ -138,7 +141,7 @@ impl<T: Transport> Client<T> {
         data: &[u8],
     ) -> Result<Vec<u8, 2048>, ClientError<T::Error>> {
         if let Some(key) = &self.key {
-            let encrypted_data = hls_encrypt(data, key);
+            let encrypted_data = hls_encrypt(data, key).map_err(ClientError::SecurityError)?;
             self.transport
                 .send(&encrypted_data)
                 .map_err(ClientError::TransportError)?;
@@ -146,7 +149,8 @@ impl<T: Transport> Client<T> {
                 .transport
                 .receive()
                 .map_err(ClientError::TransportError)?;
-            let decrypted_response = hls_decrypt(&encrypted_response, key);
+            let decrypted_response =
+                hls_decrypt(&encrypted_response, key).map_err(ClientError::SecurityError)?;
             Ok(decrypted_response)
         } else {
             self.transport

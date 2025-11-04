@@ -3,8 +3,8 @@ use heapless::Vec;
 use nom::{
     bytes::complete::{tag, take},
     combinator::opt,
-    sequence::tuple,
     IResult,
+    Parser,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,33 +56,35 @@ impl AarqApdu {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
-        let (i, _aarq_tag) = tag(&[0x60])(bytes)?;
+        let (i, _aarq_tag) = tag(&[0x60u8][..]).parse(bytes)?;
         let (i, len) = take(1usize)(i)?;
-        let (i, content) = take(len[0])(i)?;
+        let (i, content) = take(len[0] as usize)(i)?;
 
-        let (content, _acn_tag) = tag([0xA1])(content)?;
+        let (content, _acn_tag) = tag(&[0xA1u8][..]).parse(content)?;
         let (content, acn_len) = take(1usize)(content)?;
-        let (content, acn) = take(acn_len[0])(content)?;
+        let (content, acn) = take(acn_len[0] as usize)(content)?;
 
-        let (content, _sar_tag) = tag([0x8A])(content)?;
+        let (content, _sar_tag) = tag(&[0x8Au8][..]).parse(content)?;
         let (content, _sar_len) = take(1usize)(content)?;
         let (content, sar) = take(1usize)(content)?;
 
-        let (content, mn) = opt(tuple((
-            tag([0x8B]),
+        let (content, mn) = opt((
+            tag(&[0x8Bu8][..]),
             take(1usize),
             take(1usize),
-        )))(content)?;
+        ))
+        .parse(content)?;
 
-        let (content, cav) = opt(tuple((
-            tag([0xAC]),
+        let (content, cav) = opt((
+            tag(&[0xACu8][..]),
             take(1usize),
             take(1usize),
-        )))(content)?;
+        ))
+        .parse(content)?;
 
-        let (content, _ui_tag) = tag([0xBE])(content)?;
+        let (content, _ui_tag) = tag(&[0xBEu8][..]).parse(content)?;
         let (content, ui_len) = take(1usize)(content)?;
-        let (_content, ui) = take(ui_len[0])(content)?;
+        let (_content, ui) = take(ui_len[0] as usize)(content)?;
 
         let mut aarq = AarqApdu {
             application_context_name: Vec::from_slice(acn).unwrap(),
@@ -94,13 +96,13 @@ impl AarqApdu {
 
         if let Some((_, mn_len, mn_val)) = mn {
             let len = u8::from_be_bytes(mn_len[0].to_be_bytes());
-            let (mn_val, _) = take(len)(mn_val)?;
+            let (mn_val, _) = take(len as usize)(mn_val)?;
             aarq.mechanism_name = Some(Vec::from_slice(mn_val).unwrap());
         }
 
         if let Some((_, cav_len, cav_val)) = cav {
             let len = u8::from_be_bytes(cav_len[0].to_be_bytes());
-            let (cav_val, _) = take(len)(cav_val)?;
+            let (cav_val, _) = take(len as usize)(cav_val)?;
             aarq.calling_authentication_value = Some(Vec::from_slice(cav_val).unwrap());
         }
 
@@ -156,31 +158,32 @@ impl AareApdu {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
-        let (i, _aare_tag) = tag([0x61])(bytes)?;
+        let (i, _aare_tag) = tag(&[0x61u8][..]).parse(bytes)?;
         let (i, len) = take(1usize)(i)?;
-        let (i, content) = take(len[0])(i)?;
+        let (i, content) = take(len[0] as usize)(i)?;
 
-        let (content, _acn_tag) = tag([0xA1])(content)?;
+        let (content, _acn_tag) = tag(&[0xA1u8][..]).parse(content)?;
         let (content, acn_len) = take(1usize)(content)?;
-        let (content, acn) = take(acn_len[0])(content)?;
+        let (content, acn) = take(acn_len[0] as usize)(content)?;
 
-        let (content, _res_tag) = tag([0xA2])(content)?;
+        let (content, _res_tag) = tag(&[0xA2u8][..]).parse(content)?;
         let (content, _res_len) = take(1usize)(content)?;
         let (content, res) = take(1usize)(content)?;
 
-        let (content, _rsd_tag) = tag([0xA3])(content)?;
+        let (content, _rsd_tag) = tag(&[0xA3u8][..]).parse(content)?;
         let (content, _rsd_len) = take(1usize)(content)?;
         let (content, rsd) = take(1usize)(content)?;
 
-        let (content, rav) = opt(tuple((
-            tag([0xAC]),
+        let (content, rav) = opt((
+            tag(&[0xACu8][..]),
             take(1usize),
             take(1usize),
-        )))(content)?;
+        ))
+        .parse(content)?;
 
-        let (content, _ui_tag) = tag([0xBE])(content)?;
+        let (content, _ui_tag) = tag(&[0xBEu8][..]).parse(content)?;
         let (content, ui_len) = take(1usize)(content)?;
-        let (_content, ui) = take(ui_len[0])(content)?;
+        let (_content, ui) = take(ui_len[0] as usize)(content)?;
 
         let mut aare = AareApdu {
             application_context_name: Vec::from_slice(acn).unwrap(),
@@ -192,7 +195,7 @@ impl AareApdu {
 
         if let Some((_, rav_len, rav_val)) = rav {
             let len = u8::from_be_bytes(rav_len[0].to_be_bytes());
-            let (rav_val, _) = take(len)(rav_val)?;
+            let (rav_val, _) = take(len as usize)(rav_val)?;
             aare.responding_authentication_value = Some(Vec::from_slice(rav_val).unwrap());
         }
 

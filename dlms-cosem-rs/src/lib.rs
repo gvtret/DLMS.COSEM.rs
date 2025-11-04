@@ -22,6 +22,8 @@ pub mod hdlc_transport;
 pub mod tcp_transport;
 pub mod wrapper_transport;
 pub mod security;
+pub mod association_ln;
+pub mod sap_assignment;
 
 pub const MAX_PDU_SIZE: usize = 2048;
 
