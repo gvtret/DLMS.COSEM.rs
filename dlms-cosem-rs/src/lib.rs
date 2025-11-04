@@ -1,5 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![feature(alloc_error_handler)]
+#![cfg_attr(not(feature = "std"), feature(alloc_error_handler))]
 
 extern crate alloc;
 
@@ -12,6 +12,16 @@ pub mod xdlms;
 pub mod hdlc;
 pub mod client;
 pub mod acse;
+pub mod server;
+pub mod transport;
+pub mod cosem_object;
+pub mod data;
+pub mod register;
+pub mod clock;
+pub mod hdlc_transport;
+pub mod tcp_transport;
+pub mod wrapper_transport;
+pub mod security;
 
 pub const MAX_PDU_SIZE: usize = 2048;
 

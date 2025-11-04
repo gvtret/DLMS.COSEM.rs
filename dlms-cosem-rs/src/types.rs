@@ -1,5 +1,11 @@
+#[cfg(not(feature = "std"))]
 extern crate alloc;
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+
+#[cfg(feature = "std")]
+use std::vec::Vec;
+
 use heapless::String;
 
 const MAX_STRING_SIZE: usize = 256;
@@ -33,7 +39,7 @@ pub enum Data {
     DontCare,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     extern crate std;
     use super::*;

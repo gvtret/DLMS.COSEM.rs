@@ -105,7 +105,7 @@ impl HdlcFrame {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     extern crate std;
     use super::*;
