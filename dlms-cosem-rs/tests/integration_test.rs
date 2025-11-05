@@ -3,6 +3,7 @@ use dlms_cosem::server::Server;
 use dlms_cosem::transport::Transport;
 use heapless::Vec;
 use std::sync::mpsc;
+use std::thread;
 
 struct SharedMockTransport {
     tx: mpsc::Sender<Vec<u8, 2048>>,
@@ -14,17 +15,14 @@ impl Transport for SharedMockTransport {
 
     fn send(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
         let mut vec = Vec::new();
-        vec.extend_from_slice(bytes).unwrap();
-        self.tx.send(vec).unwrap();
-        Ok(())
+        vec.extend_from_slice(bytes).map_err(|_| ())?;
+        self.tx.send(vec).map_err(|_| ())
     }
 
     fn receive(&mut self) -> Result<Vec<u8, 2048>, Self::Error> {
-        Ok(self.rx.recv().unwrap())
+        self.rx.recv().map_err(|_| ())
     }
 }
-
-use std::thread;
 
 #[test]
 fn test_association() {
@@ -47,9 +45,9 @@ fn test_association() {
         let _ = server.run();
     });
 
-    let aare = client.associate().unwrap();
+    let aare = client.associate().expect("Association failed");
     assert_eq!(aare.result, 0);
 
-    // Not the best way to end the test, but it will do for now
+    // The server runs in an infinite loop, so we don't join the thread.
     // server_thread.join().unwrap();
 }

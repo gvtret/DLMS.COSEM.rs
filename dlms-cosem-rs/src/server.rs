@@ -1,6 +1,8 @@
 use crate::acse::{AarqApdu, AareApdu};
+use crate::error::DlmsError;
 use crate::hdlc::{HdlcFrame, HdlcFrameError};
-use crate::security::SecurityError;
+use crate::security::lls_authenticate;
+use crate::security::{hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
 use heapless::Vec;
 
@@ -10,6 +12,7 @@ pub enum ServerError<E> {
     AcseError,
     TransportError(E),
     SecurityError(SecurityError),
+    DlmsError(DlmsError),
 }
 
 impl<E> From<HdlcFrameError> for ServerError<E> {
@@ -18,9 +21,11 @@ impl<E> From<HdlcFrameError> for ServerError<E> {
     }
 }
 
-use crate::security::lls_authenticate;
-
-use crate::security::{hls_decrypt, hls_encrypt};
+impl<E> From<DlmsError> for ServerError<E> {
+    fn from(e: DlmsError) -> Self {
+        ServerError::DlmsError(e)
+    }
+}
 
 pub struct Server<T: Transport> {
     address: u16,
@@ -69,11 +74,9 @@ impl<T: Transport> Server<T> {
         request_bytes: &[u8],
     ) -> Result<Vec<u8, 2048>, ServerError<T::Error>> {
         let request_frame = HdlcFrame::from_bytes(request_bytes)?;
-
         let aarq = AarqApdu::from_bytes(&request_frame.information)
             .map_err(|_| ServerError::AcseError)?
             .1;
-
         let mut aare = AareApdu {
             application_context_name: aarq.application_context_name.clone(),
             result: 0,
@@ -90,7 +93,7 @@ impl<T: Transport> Server<T> {
                     let challenge = aare
                         .responding_authentication_value
                         .as_ref()
-                        .unwrap()
+                        .ok_or(ServerError::AcseError)?
                         .as_slice();
                     match lls_authenticate(password, challenge) {
                         Ok(expected_response) => {
@@ -103,7 +106,8 @@ impl<T: Transport> Server<T> {
                         Err(_) => aare.result = 1, // failure
                     }
                 } else {
-                    let challenge: Vec<u8, 32> = Vec::from_slice(b"challenge").unwrap();
+                    let challenge: Vec<u8, 32> =
+                        Vec::from_slice(b"challenge").map_err(|_| DlmsError::VecIsFull)?;
                     aare.responding_authentication_value = Some(challenge);
                 }
             }
@@ -111,9 +115,9 @@ impl<T: Transport> Server<T> {
 
         aare.user_information
             .extend_from_slice(b"user_info")
-            .unwrap();
+            .map_err(|_| DlmsError::VecIsFull)?;
 
-        let response_bytes = aare.to_bytes();
+        let response_bytes = aare.to_bytes()?;
 
         let response_hdlc_frame = HdlcFrame {
             address: self.address,
@@ -121,6 +125,6 @@ impl<T: Transport> Server<T> {
             information: response_bytes,
         };
 
-        Ok(response_hdlc_frame.to_bytes())
+        Ok(response_hdlc_frame.to_bytes()?)
     }
 }
