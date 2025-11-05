@@ -24,7 +24,7 @@ impl Default for Register {
 }
 
 impl CosemObject for Register {
-    fn class_id() -> u16 {
+    fn class_id(&self) -> u16 {
         3
     }
 

@@ -8,7 +8,7 @@ pub struct Data {
 }
 
 impl CosemObject for Data {
-    fn class_id() -> u16 {
+    fn class_id(&self) -> u16 {
         1
     }
 

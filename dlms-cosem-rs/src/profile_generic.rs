@@ -34,7 +34,7 @@ impl Default for ProfileGeneric {
 }
 
 impl CosemObject for ProfileGeneric {
-    fn class_id() -> u16 {
+    fn class_id(&self) -> u16 {
         7
     }
 

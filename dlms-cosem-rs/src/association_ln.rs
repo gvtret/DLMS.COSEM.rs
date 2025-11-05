@@ -13,7 +13,7 @@ pub struct AssociationLN {
 }
 
 impl CosemObject for AssociationLN {
-    fn class_id() -> u16 {
+    fn class_id(&self) -> u16 {
         15
     }
 
