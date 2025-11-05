@@ -8,6 +8,21 @@ pub struct Register {
     scaler_unit: CosemData,
 }
 
+impl Register {
+    pub fn new() -> Self {
+        Self {
+            value: CosemData::NullData,
+            scaler_unit: CosemData::NullData,
+        }
+    }
+}
+
+impl Default for Register {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CosemObject for Register {
     fn class_id() -> u16 {
         3
@@ -31,6 +46,10 @@ impl CosemObject for Register {
                 self.value = data;
                 Some(())
             }
+            3 => {
+                self.scaler_unit = data;
+                Some(())
+            }
             _ => None,
         }
     }
@@ -41,5 +60,27 @@ impl CosemObject for Register {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    extern crate std;
+    use super::*;
+
+    #[test]
+    fn test_register_new() {
+        let register = Register::new();
+        assert_eq!(register.get_attribute(2), Some(CosemData::NullData));
+        assert_eq!(register.get_attribute(3), Some(CosemData::NullData));
+    }
+
+    #[test]
+    fn test_register_set_get() {
+        let mut register = Register::new();
+        register
+            .set_attribute(2, CosemData::Unsigned(10))
+            .unwrap();
+        assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(10)));
     }
 }

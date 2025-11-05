@@ -1,17 +1,61 @@
+#![cfg(feature = "std")]
+
 use crate::transport::Transport;
 use heapless::Vec;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 
 #[derive(Debug)]
-pub struct WrapperTransport {}
+pub enum WrapperTransportError {
+    Io(std::io::Error),
+    VecIsFull,
+}
+
+impl From<std::io::Error> for WrapperTransportError {
+    fn from(e: std::io::Error) -> Self {
+        WrapperTransportError::Io(e)
+    }
+}
+
+pub struct WrapperTransport {
+    stream: TcpStream,
+}
+
+impl WrapperTransport {
+    pub fn new(addr: &str) -> Result<Self, WrapperTransportError> {
+        let stream = TcpStream::connect(addr)?;
+        Ok(Self { stream })
+    }
+}
 
 impl Transport for WrapperTransport {
-    type Error = ();
+    type Error = WrapperTransportError;
 
-    fn send(&mut self, _bytes: &[u8]) -> Result<(), Self::Error> {
+    fn send(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        let len = bytes.len() as u16;
+        self.stream.write_all(&len.to_be_bytes())?;
+        self.stream.write_all(bytes)?;
         Ok(())
     }
 
     fn receive(&mut self) -> Result<Vec<u8, 2048>, Self::Error> {
-        Ok(Vec::new())
+        let mut len_bytes = [0u8; 2];
+        self.stream.read_exact(&mut len_bytes)?;
+        let len = u16::from_be_bytes(len_bytes) as usize;
+
+        let mut buffer = [0u8; 2048];
+        if len > buffer.len() {
+            return Err(WrapperTransportError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Frame too large",
+            )));
+        }
+        self.stream.read_exact(&mut buffer[..len])?;
+
+        let mut vec = Vec::new();
+        vec.extend_from_slice(&buffer[..len])
+            .map_err(|_| WrapperTransportError::VecIsFull)?;
+
+        Ok(vec)
     }
 }
