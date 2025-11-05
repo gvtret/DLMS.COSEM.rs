@@ -27,6 +27,10 @@ pub mod error;
 pub mod axdr;
 pub mod profile_generic;
 pub mod demand_register;
+pub mod extended_register;
+pub mod security_setup;
+pub mod activity_calendar;
+pub mod disconnect_control;
 
 pub const MAX_PDU_SIZE: usize = 2048;
 
