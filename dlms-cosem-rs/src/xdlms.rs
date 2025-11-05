@@ -140,6 +140,35 @@ impl GetRequest {
                     access_selection,
                 }))
             }
+            194 => {
+                let (invoke_id_and_priority, rest) = rest.split_at(1);
+                let (len, mut rest) = rest.split_at(1);
+                let mut attribute_descriptor_list = Vec::new();
+                for _ in 0..len[0] {
+                    let (class_id, r) = rest.split_at(2);
+                    let (instance_id, r) = r.split_at(6);
+                    let (attribute_id, r) = r.split_at(1);
+                    rest = r;
+
+                    let mut class_id_bytes = [0u8; 2];
+                    class_id_bytes.copy_from_slice(class_id);
+
+                    let mut instance_id_bytes = [0u8; 6];
+                    instance_id_bytes.copy_from_slice(instance_id);
+
+                    attribute_descriptor_list
+                        .push(CosemAttributeDescriptor {
+                            class_id: u16::from_be_bytes(class_id_bytes),
+                            instance_id: instance_id_bytes,
+                            attribute_id: attribute_id[0] as i8,
+                        })
+                        .map_err(|_| DlmsError::VecIsFull)?;
+                }
+                Ok(GetRequest::WithList(GetRequestWithList {
+                    invoke_id_and_priority: invoke_id_and_priority[0],
+                    attribute_descriptor_list,
+                }))
+            }
             _ => Err(DlmsError::Xdlms),
         }
     }
@@ -169,10 +198,76 @@ mod tests {
     }
 
     #[test]
+    fn test_get_request_with_list_serialization_deserialization() {
+        let mut list = Vec::new();
+        list.push(CosemAttributeDescriptor {
+            class_id: 8,
+            instance_id: [0, 0, 1, 0, 0, 255],
+            attribute_id: 2,
+        })
+        .unwrap();
+        list.push(CosemAttributeDescriptor {
+            class_id: 3,
+            instance_id: [0, 0, 2, 0, 0, 255],
+            attribute_id: 3,
+        })
+        .unwrap();
+
+        let req = GetRequest::WithList(GetRequestWithList {
+            invoke_id_and_priority: 1,
+            attribute_descriptor_list: list,
+        });
+
+        let bytes = req.to_bytes().unwrap();
+        let req2 = GetRequest::from_bytes(&bytes).unwrap();
+
+        assert_eq!(req, req2);
+    }
+
+    #[test]
     fn test_get_response_normal_serialization_deserialization() {
         let res = GetResponse::Normal(GetResponseNormal {
             invoke_id_and_priority: 1,
             result: GetDataResult::Data(Data::NullData),
+        });
+
+        let bytes = res.to_bytes().unwrap();
+        let res2 = GetResponse::from_bytes(&bytes).unwrap();
+
+        assert_eq!(res, res2);
+    }
+
+    #[test]
+    fn test_get_response_with_list_serialization_deserialization() {
+        let mut list = Vec::new();
+        list.push(GetDataResult::Data(Data::NullData)).unwrap();
+        list.push(GetDataResult::DataAccessResult(
+            DataAccessResult::Success,
+        ))
+        .unwrap();
+
+        let res = GetResponse::WithList(GetResponseWithList {
+            invoke_id_and_priority: 1,
+            result: list,
+        });
+
+        let bytes = res.to_bytes().unwrap();
+        let res2 = GetResponse::from_bytes(&bytes).unwrap();
+
+        assert_eq!(res, res2);
+    }
+
+    #[test]
+    fn test_get_response_with_datablock_serialization_deserialization() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"hello world").unwrap();
+        let res = GetResponse::WithDataBlock(GetResponseWithDatablock {
+            invoke_id_and_priority: 1,
+            result: DataBlockG {
+                last_block: true,
+                block_number: 1,
+                raw_data: data,
+            },
         });
 
         let bytes = res.to_bytes().unwrap();
@@ -308,7 +403,7 @@ pub struct GetResponseNormal {
 pub struct DataBlockG {
     pub last_block: bool,
     pub block_number: u32,
-    pub result: Result<Vec<u8, 1024>, DataAccessResult>,
+    pub raw_data: Vec<u8, 1024>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -346,11 +441,50 @@ impl GetResponse {
                     }
                     GetDataResult::DataAccessResult(dar) => {
                         bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // data-access-result
-                        bytes.push(dar.clone().into()).map_err(|_| DlmsError::VecIsFull)?;
+                        bytes
+                            .push(dar.clone().into())
+                            .map_err(|_| DlmsError::VecIsFull)?;
                     }
                 }
             }
-            _ => return Err(DlmsError::Xdlms),
+            GetResponse::WithList(res) => {
+                bytes.push(198).map_err(|_| DlmsError::VecIsFull)?; // get-response-with-list
+                bytes
+                    .push(res.invoke_id_and_priority)
+                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes
+                    .push(res.result.len() as u8)
+                    .map_err(|_| DlmsError::VecIsFull)?;
+                for item in &res.result {
+                    match item {
+                        GetDataResult::Data(data) => {
+                            bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // data
+                            encode_data(data, &mut bytes)?;
+                        }
+                        GetDataResult::DataAccessResult(dar) => {
+                            bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // data-access-result
+                            bytes
+                                .push(dar.clone().into())
+                                .map_err(|_| DlmsError::VecIsFull)?;
+                        }
+                    }
+                }
+            }
+            GetResponse::WithDataBlock(res) => {
+                bytes.push(197).map_err(|_| DlmsError::VecIsFull)?; // get-response-with-datablock
+                bytes
+                    .push(res.invoke_id_and_priority)
+                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes
+                    .push(res.result.last_block as u8)
+                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes
+                    .extend_from_slice(&res.result.block_number.to_be_bytes())
+                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes
+                    .extend_from_slice(&res.result.raw_data)
+                    .map_err(|_| DlmsError::VecIsFull)?;
+            }
         }
         Ok(bytes)
     }
@@ -391,6 +525,65 @@ impl GetResponse {
                 Ok(GetResponse::Normal(GetResponseNormal {
                     invoke_id_and_priority: invoke_id_and_priority[0],
                     result,
+                }))
+            }
+            198 => {
+                let (invoke_id_and_priority, rest) = rest.split_at(1);
+                let (len, mut rest) = rest.split_at(1);
+                let mut result = Vec::new();
+                for _ in 0..len[0] {
+                    let (result_type, r) = rest.split_at(1);
+                    rest = r;
+                    let item = if result_type[0] == 0 {
+                        let (data, r) = decode_data(rest)?;
+                        rest = r;
+                        GetDataResult::Data(data)
+                    } else {
+                        let (dar, r) = rest.split_at(1);
+                        rest = r;
+                        GetDataResult::DataAccessResult(match dar[0] {
+                            0 => DataAccessResult::Success,
+                            1 => DataAccessResult::HardwareFault,
+                            2 => DataAccessResult::TemporaryFailure,
+                            3 => DataAccessResult::ReadWriteDenied,
+                            4 => DataAccessResult::ObjectUndefined,
+                            5 => DataAccessResult::ObjectClassInconsistent,
+                            6 => DataAccessResult::ObjectUnavailable,
+                            7 => DataAccessResult::TypeUnmatched,
+                            8 => DataAccessResult::ScopeOfAccessViolated,
+                            9 => DataAccessResult::DataBlockUnavailable,
+                            10 => DataAccessResult::LongGetAborted,
+                            11 => DataAccessResult::NoLongGetInProgress,
+                            12 => DataAccessResult::LongSetAborted,
+                            13 => DataAccessResult::NoLongSetInProgress,
+                            14 => DataAccessResult::DataBlockNumberInvalid,
+                            reason => DataAccessResult::OtherReason(reason),
+                        })
+                    };
+                    result.push(item).map_err(|_| DlmsError::VecIsFull)?;
+                }
+                Ok(GetResponse::WithList(GetResponseWithList {
+                    invoke_id_and_priority: invoke_id_and_priority[0],
+                    result,
+                }))
+            }
+            197 => {
+                let (invoke_id_and_priority, rest) = rest.split_at(1);
+                let (last_block, rest) = rest.split_at(1);
+                let (block_number, rest) = rest.split_at(4);
+                let mut raw_data = Vec::new();
+                raw_data.extend_from_slice(rest).map_err(|_| DlmsError::VecIsFull)?;
+
+                let mut block_number_bytes = [0u8; 4];
+                block_number_bytes.copy_from_slice(block_number);
+
+                Ok(GetResponse::WithDataBlock(GetResponseWithDatablock {
+                    invoke_id_and_priority: invoke_id_and_priority[0],
+                    result: DataBlockG {
+                        last_block: last_block[0] != 0,
+                        block_number: u32::from_be_bytes(block_number_bytes),
+                        raw_data,
+                    },
                 }))
             }
             _ => Err(DlmsError::Xdlms),
@@ -778,7 +971,9 @@ impl ActionResponse {
                             encode_data(data, &mut bytes)?;
                         }
                         GetDataResult::DataAccessResult(dar) => {
-                            bytes.push(dar.clone().into()).map_err(|_| DlmsError::VecIsFull)?;
+                            bytes
+                                .push(dar.clone().into())
+                                .map_err(|_| DlmsError::VecIsFull)?;
                         }
                     }
                 } else {

@@ -15,6 +15,8 @@ aead = { version = "0.5.2", default-features = false, features = ["alloc", "getr
 aes-gcm = { version = "0.10.3", default-features = false, features = ["alloc", "aes"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["getrandom"] }
 generic-array = "1.3.5"
+serialport = { version = "4.2.2", optional = true }
+
 
 [features]
 default = []
@@ -23,7 +25,8 @@ std = [
     "hmac/std",
     "sha2/std",
     "aes-gcm/std",
-    "rand_core/std"
+    "rand_core/std",
+    "serialport"
 ]
 
 [lib]
