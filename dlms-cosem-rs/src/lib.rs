@@ -19,7 +19,6 @@ pub mod data;
 pub mod register;
 pub mod clock;
 pub mod hdlc_transport;
-pub mod tcp_transport;
 pub mod wrapper_transport;
 pub mod security;
 pub mod association_ln;

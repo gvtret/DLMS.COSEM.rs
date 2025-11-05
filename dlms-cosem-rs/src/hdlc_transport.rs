@@ -1,52 +1,37 @@
-#![cfg(feature = "serialport")]
+#![cfg(feature = "std")]
 
 use crate::hdlc::HDLC_FLAG;
 use crate::transport::Transport;
 use heapless::Vec;
-use serialport::{Error as SerialError, SerialPort};
-use std::io;
+use std::io::{Read, Write};
 
 #[derive(Debug)]
 pub enum HdlcTransportError {
-    Serial(SerialError),
-    Io(io::Error),
+    Io(std::io::Error),
     VecIsFull,
-    FrameTooShort,
 }
 
-impl From<SerialError> for HdlcTransportError {
-    fn from(e: SerialError) -> Self {
-        HdlcTransportError::Serial(e)
-    }
-}
-
-impl From<io::Error> for HdlcTransportError {
-    fn from(e: io::Error) -> Self {
+impl From<std::io::Error> for HdlcTransportError {
+    fn from(e: std::io::Error) -> Self {
         HdlcTransportError::Io(e)
     }
 }
 
-pub struct HdlcTransport {
-    port: Box<dyn SerialPort>,
+pub struct HdlcTransport<T: Read + Write> {
+    stream: T,
 }
 
-impl HdlcTransport {
-    pub fn new(port_path: &str, baud_rate: u32) -> Result<Self, HdlcTransportError> {
-        let port = serialport::new(port_path, baud_rate).open()?;
-        Ok(Self { port })
-    }
-
-    #[cfg(test)]
-    pub fn with_port(port: Box<dyn SerialPort>) -> Self {
-        Self { port }
+impl<T: Read + Write> HdlcTransport<T> {
+    pub fn new(stream: T) -> Self {
+        Self { stream }
     }
 }
 
-impl Transport for HdlcTransport {
+impl<T: Read + Write> Transport for HdlcTransport<T> {
     type Error = HdlcTransportError;
 
     fn send(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
-        self.port.write_all(bytes)?;
+        self.stream.write_all(bytes)?;
         Ok(())
     }
 
@@ -56,7 +41,7 @@ impl Transport for HdlcTransport {
         let mut in_frame = false;
 
         loop {
-            self.port.read_exact(&mut byte_buffer)?;
+            self.stream.read_exact(&mut byte_buffer)?;
             let byte = byte_buffer[0];
 
             if byte == HDLC_FLAG {
@@ -67,7 +52,6 @@ impl Transport for HdlcTransport {
                             .map_err(|_| HdlcTransportError::VecIsFull)?;
                         return Ok(buffer);
                     } else {
-                        // Frame is too short, reset and continue
                         buffer.clear();
                         in_frame = false;
                     }
