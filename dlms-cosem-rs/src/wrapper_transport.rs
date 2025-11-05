@@ -3,7 +3,6 @@
 use crate::transport::Transport;
 use heapless::Vec;
 use std::io::{Read, Write};
-use std::net::TcpStream;
 
 #[derive(Debug)]
 pub enum WrapperTransportError {
@@ -17,18 +16,17 @@ impl From<std::io::Error> for WrapperTransportError {
     }
 }
 
-pub struct WrapperTransport {
-    stream: TcpStream,
+pub struct WrapperTransport<T: Read + Write> {
+    stream: T,
 }
 
-impl WrapperTransport {
-    pub fn new(addr: &str) -> Result<Self, WrapperTransportError> {
-        let stream = TcpStream::connect(addr)?;
-        Ok(Self { stream })
+impl<T: Read + Write> WrapperTransport<T> {
+    pub fn new(stream: T) -> Self {
+        Self { stream }
     }
 }
 
-impl Transport for WrapperTransport {
+impl<T: Read + Write> Transport for WrapperTransport<T> {
     type Error = WrapperTransportError;
 
     fn send(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
