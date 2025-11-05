@@ -1,27 +1,30 @@
 use crate::acse::{AarqApdu, AareApdu};
-use crate::hdlc::{HdlcFrame, HdlcFrameError};
-use crate::security::SecurityError;
+use crate::error::DlmsError;
+use crate::hdlc::HdlcFrame;
+use crate::security::{lls_authenticate, hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
 use crate::xdlms::{GetRequest, GetResponse};
 use heapless::Vec;
 
 #[derive(Debug)]
 pub enum ClientError<E> {
-    HdlcError(HdlcFrameError),
     AcseError,
     TransportError(E),
+    DlmsError(DlmsError),
     SecurityError(SecurityError),
 }
 
-impl<E> From<HdlcFrameError> for ClientError<E> {
-    fn from(e: HdlcFrameError) -> Self {
-        ClientError::HdlcError(e)
+impl<E> From<DlmsError> for ClientError<E> {
+    fn from(e: DlmsError) -> Self {
+        ClientError::DlmsError(e)
     }
 }
 
-use crate::security::lls_authenticate;
-
-use crate::security::{hls_decrypt, hls_encrypt};
+impl<E> From<SecurityError> for ClientError<E> {
+    fn from(e: SecurityError) -> Self {
+        ClientError::SecurityError(e)
+    }
+}
 
 pub struct Client<T: Transport> {
     address: u16,
@@ -53,12 +56,14 @@ impl<T: Transport> Client<T> {
             calling_authentication_value: None,
             user_information: Vec::new(),
         };
-        aarq.application_context_name.extend_from_slice(b"LN_WITH_NO_CIPHERING").unwrap();
+        aarq.application_context_name
+            .extend_from_slice(b"LN_WITH_NO_CIPHERING")
+            .map_err(|_| DlmsError::VecIsFull)?;
         if self.password.is_some() {
-            aarq.mechanism_name = Some(Vec::from_slice(b"LLS").unwrap());
+            aarq.mechanism_name = Some(Vec::from_slice(b"LLS").map_err(|_| DlmsError::VecIsFull)?);
         }
 
-        let request_bytes = aarq.to_bytes();
+        let request_bytes = aarq.to_bytes()?;
 
         let hdlc_frame = HdlcFrame {
             address: self.address,
@@ -66,40 +71,35 @@ impl<T: Transport> Client<T> {
             information: request_bytes,
         };
 
-        let hdlc_bytes = hdlc_frame.to_bytes();
-
+        let hdlc_bytes = hdlc_frame.to_bytes()?;
         let response_hdlc_bytes = self.send_and_receive(&hdlc_bytes)?;
-
         let response_frame = HdlcFrame::from_bytes(&response_hdlc_bytes)?;
-
         let aare = AareApdu::from_bytes(&response_frame.information)
             .map_err(|_| ClientError::AcseError)?
             .1;
 
-        if let (Some(password), Some(challenge)) = (
-            &self.password,
-            aare.responding_authentication_value.as_ref(),
-        ) {
-            let response =
-                lls_authenticate(password, challenge).map_err(ClientError::SecurityError)?;
+        if let (Some(password), Some(challenge)) =
+            (&self.password, aare.responding_authentication_value.as_ref())
+        {
+            let response = lls_authenticate(password, challenge)?;
             let mut aarq = AarqApdu {
                 application_context_name: Vec::new(),
                 sender_acse_requirements: 0,
-                mechanism_name: Some(Vec::from_slice(b"LLS").unwrap()),
+                mechanism_name: Some(Vec::from_slice(b"LLS").map_err(|_| DlmsError::VecIsFull)?),
                 calling_authentication_value: Some(response),
                 user_information: Vec::new(),
             };
             aarq.application_context_name
                 .extend_from_slice(b"LN_WITH_NO_CIPHERING")
-                .unwrap();
+                .map_err(|_| DlmsError::VecIsFull)?;
 
-            let request_bytes = aarq.to_bytes();
+            let request_bytes = aarq.to_bytes()?;
             let hdlc_frame = HdlcFrame {
                 address: self.address,
                 control: 0,
                 information: request_bytes,
             };
-            let hdlc_bytes = hdlc_frame.to_bytes();
+            let hdlc_bytes = hdlc_frame.to_bytes()?;
             let response_hdlc_bytes = self.send_and_receive(&hdlc_bytes)?;
             let response_frame = HdlcFrame::from_bytes(&response_hdlc_bytes)?;
             let aare = AareApdu::from_bytes(&response_frame.information)
@@ -115,23 +115,18 @@ impl<T: Transport> Client<T> {
         &mut self,
         request: GetRequest,
     ) -> Result<GetResponse, ClientError<T::Error>> {
-        let request_bytes = request.to_bytes();
-        let mut request_vec = Vec::new();
-        request_vec.extend_from_slice(&request_bytes).unwrap();
+        let request_bytes = request.to_bytes()?;
 
         let hdlc_frame = HdlcFrame {
             address: self.address,
             control: 0,
-            information: request_vec,
+            information: request_bytes,
         };
 
-        let hdlc_bytes = hdlc_frame.to_bytes();
-
+        let hdlc_bytes = hdlc_frame.to_bytes()?;
         let response_hdlc_bytes = self.send_and_receive(&hdlc_bytes)?;
-
         let response_frame = HdlcFrame::from_bytes(&response_hdlc_bytes)?;
-
-        let response = GetResponse::from_bytes(&response_frame.information);
+        let response = GetResponse::from_bytes(&response_frame.information)?;
 
         Ok(response)
     }
@@ -141,7 +136,7 @@ impl<T: Transport> Client<T> {
         data: &[u8],
     ) -> Result<Vec<u8, 2048>, ClientError<T::Error>> {
         if let Some(key) = &self.key {
-            let encrypted_data = hls_encrypt(data, key).map_err(ClientError::SecurityError)?;
+            let encrypted_data = hls_encrypt(data, key)?;
             self.transport
                 .send(&encrypted_data)
                 .map_err(ClientError::TransportError)?;
@@ -149,16 +144,12 @@ impl<T: Transport> Client<T> {
                 .transport
                 .receive()
                 .map_err(ClientError::TransportError)?;
-            let decrypted_response =
-                hls_decrypt(&encrypted_response, key).map_err(ClientError::SecurityError)?;
-            Ok(decrypted_response)
+            Ok(hls_decrypt(&encrypted_response, key)?)
         } else {
             self.transport
                 .send(data)
                 .map_err(ClientError::TransportError)?;
-            self.transport
-                .receive()
-                .map_err(ClientError::TransportError)
+            self.transport.receive().map_err(ClientError::TransportError)
         }
     }
 }
