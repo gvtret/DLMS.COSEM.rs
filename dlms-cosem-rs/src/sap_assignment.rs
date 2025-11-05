@@ -1,58 +1,36 @@
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
-#[cfg(feature = "std")]
-use std::vec::Vec;
-
-use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
 use crate::cosem_object::CosemObject;
+use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
 use crate::types::Data as CosemData;
+use heapless::Vec;
 
 #[derive(Debug)]
 pub struct SapAssignment {
-    pub logical_device_name_list: CosemData,
-}
-
-impl SapAssignment {
-    pub fn new() -> Self {
-        Self {
-            logical_device_name_list: CosemData::Array(Vec::new()),
-        }
-    }
-}
-
-impl Default for SapAssignment {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub logical_device_name_list: Vec<u8, 2048>,
 }
 
 impl CosemObject for SapAssignment {
-    fn class_id() -> u16 {
+    fn class_id(&self) -> u16 {
         21
     }
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {
         match attribute_id {
-            2 => Some(self.logical_device_name_list.clone()),
+            2 => {
+                let mut vec = heapless::Vec::new();
+                vec.extend_from_slice(&self.logical_device_name_list)
+                    .unwrap();
+                Some(CosemData::OctetString(vec))
+            }
             _ => None,
         }
     }
 
     fn set_attribute(
         &mut self,
-        attribute_id: CosemObjectAttributeId,
-        data: CosemData,
+        _attribute_id: CosemObjectAttributeId,
+        _data: CosemData,
     ) -> Option<()> {
-        match attribute_id {
-            2 => {
-                self.logical_device_name_list = data;
-                Some(())
-            }
-            _ => None,
-        }
+        None
     }
 
     fn invoke_method(

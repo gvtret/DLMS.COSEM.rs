@@ -34,7 +34,7 @@ impl Default for Clock {
 }
 
 impl CosemObject for Clock {
-    fn class_id() -> u16 {
+    fn class_id(&self) -> u16 {
         8
     }
 

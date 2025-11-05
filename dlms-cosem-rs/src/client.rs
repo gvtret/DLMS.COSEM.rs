@@ -3,7 +3,7 @@ use crate::error::DlmsError;
 use crate::hdlc::HdlcFrame;
 use crate::security::{lls_authenticate, hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
-use crate::xdlms::{GetRequest, GetResponse};
+use crate::xdlms::{GetRequest, GetResponse, SetRequest, SetResponse, ActionRequest, ActionResponse};
 use heapless::Vec;
 
 #[derive(Debug)]
@@ -111,7 +111,7 @@ impl<T: Transport> Client<T> {
         Ok(aare)
     }
 
-    pub fn send_request(
+    pub fn send_get_request(
         &mut self,
         request: GetRequest,
     ) -> Result<GetResponse, ClientError<T::Error>> {
@@ -127,6 +127,46 @@ impl<T: Transport> Client<T> {
         let response_hdlc_bytes = self.send_and_receive(&hdlc_bytes)?;
         let response_frame = HdlcFrame::from_bytes(&response_hdlc_bytes)?;
         let response = GetResponse::from_bytes(&response_frame.information)?;
+
+        Ok(response)
+    }
+
+    pub fn send_set_request(
+        &mut self,
+        request: SetRequest,
+    ) -> Result<SetResponse, ClientError<T::Error>> {
+        let request_bytes = request.to_bytes()?;
+
+        let hdlc_frame = HdlcFrame {
+            address: self.address,
+            control: 0,
+            information: request_bytes,
+        };
+
+        let hdlc_bytes = hdlc_frame.to_bytes()?;
+        let response_hdlc_bytes = self.send_and_receive(&hdlc_bytes)?;
+        let response_frame = HdlcFrame::from_bytes(&response_hdlc_bytes)?;
+        let response = SetResponse::from_bytes(&response_frame.information)?;
+
+        Ok(response)
+    }
+
+    pub fn send_action_request(
+        &mut self,
+        request: ActionRequest,
+    ) -> Result<ActionResponse, ClientError<T::Error>> {
+        let request_bytes = request.to_bytes()?;
+
+        let hdlc_frame = HdlcFrame {
+            address: self.address,
+            control: 0,
+            information: request_bytes,
+        };
+
+        let hdlc_bytes = hdlc_frame.to_bytes()?;
+        let response_hdlc_bytes = self.send_and_receive(&hdlc_bytes)?;
+        let response_frame = HdlcFrame::from_bytes(&response_hdlc_bytes)?;
+        let response = ActionResponse::from_bytes(&response_frame.information)?;
 
         Ok(response)
     }
