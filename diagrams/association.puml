@@ -1,0 +1,10 @@
+@startuml
+autonumber
+actor Client
+participant Server
+
+Client -> Server: AARQ (with LLS mechanism name)
+Server -> Client: AARE (with server challenge)
+Client -> Server: AARQ (with client response)
+Server -> Client: AARE (association result)
+@enduml

@@ -12,6 +12,7 @@ use crate::xdlms::{
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use heapless::Vec;
+use rand_core::RngCore;
 
 #[derive(Debug)]
 pub enum ServerError<E> {
@@ -40,6 +41,7 @@ pub struct Server<T: Transport> {
     password: Option<Vec<u8, 32>>,
     key: Option<Vec<u8, 16>>,
     objects: BTreeMap<[u8; 6], Box<dyn CosemObject>>,
+    challenge: Option<Vec<u8, 32>>,
 }
 
 impl<T: Transport> Server<T> {
@@ -55,6 +57,7 @@ impl<T: Transport> Server<T> {
             password,
             key,
             objects: BTreeMap::new(),
+            challenge: None,
         }
     }
 
@@ -102,8 +105,8 @@ impl<T: Transport> Server<T> {
                 {
                     if mechanism_name == b"LLS" {
                         if let Some(auth_value) = aarq.1.calling_authentication_value {
-                            let challenge = aare
-                                .responding_authentication_value
+                            let challenge = self
+                                .challenge
                                 .as_ref()
                                 .ok_or(ServerError::AcseError)?
                                 .as_slice();
@@ -118,8 +121,11 @@ impl<T: Transport> Server<T> {
                                 Err(_) => aare.result = 1, // failure
                             }
                         } else {
+                            let mut challenge_bytes = [0u8; 32];
+                            rand_core::OsRng.fill_bytes(&mut challenge_bytes);
                             let challenge: Vec<u8, 32> =
-                                Vec::from_slice(b"challenge").map_err(|_| DlmsError::VecIsFull)?;
+                                Vec::from_slice(&challenge_bytes).map_err(|_| DlmsError::VecIsFull)?;
+                            self.challenge = Some(challenge.clone());
                             aare.responding_authentication_value = Some(challenge);
                         }
                     }
