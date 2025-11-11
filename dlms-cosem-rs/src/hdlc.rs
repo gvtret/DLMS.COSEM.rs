@@ -40,21 +40,10 @@ impl From<HdlcFrameError> for DlmsError {
 
 impl HdlcFrame {
     pub fn to_bytes(&self) -> Result<Vec<u8, MAX_PDU_SIZE>, DlmsError> {
-        let info_len = self.information.len();
-        // Frame Format (2) + Address (2) + Control (1) + Information (info_len) + FCS (2)
-        let frame_len = 2 + 2 + 1 + info_len + 2;
-
-        if frame_len > 2047 {
-            return Err(DlmsError::VecIsFull);
-        }
-
-        // Frame Type: 1010 (binary) for I-frame/UI-frame, no segmentation
-        let format_field: u16 = 0b1010_0000_0000_0000 | (frame_len as u16);
+        let mut frame = Vec::<u8, MAX_PDU_SIZE>::new();
+        frame.push(HDLC_FLAG).map_err(|_| DlmsError::VecIsFull)?;
 
         let mut data_to_checksum = Vec::<u8, MAX_PDU_SIZE>::new();
-        data_to_checksum
-            .extend_from_slice(&format_field.to_be_bytes())
-            .map_err(|_| DlmsError::VecIsFull)?;
         data_to_checksum
             .extend_from_slice(&self.address.to_be_bytes())
             .map_err(|_| DlmsError::VecIsFull)?;
@@ -65,55 +54,72 @@ impl HdlcFrame {
             .extend_from_slice(&self.information)
             .map_err(|_| DlmsError::VecIsFull)?;
 
-        let fcs = CRC_ALGORITHM.checksum(&data_to_checksum);
+        let checksum = CRC_ALGORITHM.checksum(&data_to_checksum);
 
-        let mut frame = Vec::<u8, MAX_PDU_SIZE>::new();
-        frame.push(HDLC_FLAG).map_err(|_| DlmsError::VecIsFull)?;
-        frame
-            .extend_from_slice(&data_to_checksum)
+        let mut frame_body = Vec::<u8, MAX_PDU_SIZE>::new();
+        frame_body
+            .extend_from_slice(&self.address.to_be_bytes())
             .map_err(|_| DlmsError::VecIsFull)?;
-        frame
-            .extend_from_slice(&fcs.to_le_bytes())
+        frame_body
+            .push(self.control)
             .map_err(|_| DlmsError::VecIsFull)?;
+        frame_body
+            .extend_from_slice(&self.information)
+            .map_err(|_| DlmsError::VecIsFull)?;
+        frame_body
+            .extend_from_slice(&checksum.to_le_bytes())
+            .map_err(|_| DlmsError::VecIsFull)?;
+
+        for byte in frame_body {
+            if byte == HDLC_FLAG || byte == 0x7D {
+                frame.push(0x7D).map_err(|_| DlmsError::VecIsFull)?;
+                frame.push(byte ^ 0x20).map_err(|_| DlmsError::VecIsFull)?;
+            } else {
+                frame.push(byte).map_err(|_| DlmsError::VecIsFull)?;
+            }
+        }
+
         frame.push(HDLC_FLAG).map_err(|_| DlmsError::VecIsFull)?;
 
         Ok(frame)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DlmsError> {
-        if bytes.len() < 9 || bytes[0] != HDLC_FLAG || bytes[bytes.len() - 1] != HDLC_FLAG {
+        if bytes.len() < 6 || bytes[0] != HDLC_FLAG || bytes[bytes.len() - 1] != HDLC_FLAG {
             return Err(HdlcFrameError::InvalidFrame.into());
         }
 
-        let frame_body = &bytes[1..bytes.len() - 1];
+        let mut frame_body = Vec::<u8, MAX_PDU_SIZE>::new();
+        let mut i = 1;
+        while i < bytes.len() - 1 {
+            if bytes[i] == 0x7D {
+                i += 1;
+                frame_body
+                    .push(bytes[i] ^ 0x20)
+                    .map_err(|_| DlmsError::VecIsFull)?;
+            } else {
+                frame_body.push(bytes[i]).map_err(|_| DlmsError::VecIsFull)?;
+            }
+            i += 1;
+        }
 
-        // Extract format field and declared length
-        let format_field = u16::from_be_bytes([frame_body[0], frame_body[1]]);
-        let declared_len = (format_field & 0x07FF) as usize;
-
-        if frame_body.len() != declared_len {
+        if frame_body.len() < 4 {
             return Err(HdlcFrameError::InvalidFrame.into());
         }
 
-        let data_to_checksum = &frame_body[..frame_body.len() - 2];
-        let received_fcs_bytes: [u8; 2] =
+        let received_checksum_bytes: [u8; 2] =
             [frame_body[frame_body.len() - 2], frame_body[frame_body.len() - 1]];
-        let received_fcs = u16::from_le_bytes(received_fcs_bytes);
+        let received_checksum = u16::from_le_bytes(received_checksum_bytes);
+        let data_to_checksum = &frame_body[..frame_body.len() - 2];
+        let calculated_checksum = CRC_ALGORITHM.checksum(data_to_checksum);
 
-        let calculated_fcs = CRC_ALGORITHM.checksum(data_to_checksum);
-
-        if received_fcs != calculated_fcs {
+        if received_checksum != calculated_checksum {
             return Err(HdlcFrameError::InvalidFcs.into());
         }
 
-        // data_to_checksum is: format(2) + address(2) + control(1) + information(...)
-        if data_to_checksum.len() < 5 {
-            return Err(HdlcFrameError::InvalidFrame.into());
-        }
-
-        let address = u16::from_be_bytes([data_to_checksum[2], data_to_checksum[3]]);
-        let control = data_to_checksum[4];
-        let information = Vec::<u8, MAX_PDU_SIZE>::from_slice(&data_to_checksum[5..])
+        let address = u16::from_be_bytes([data_to_checksum[0], data_to_checksum[1]]);
+        let control = data_to_checksum[2];
+        let information = Vec::<u8, MAX_PDU_SIZE>::from_slice(&data_to_checksum[3..])
             .map_err(|_| DlmsError::VecIsFull)?;
 
         Ok(HdlcFrame {
