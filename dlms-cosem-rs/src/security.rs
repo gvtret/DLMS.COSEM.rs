@@ -5,11 +5,12 @@ use heapless::Vec;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SecurityError {
     InvalidKeyLength,
     EncryptionError,
     DecryptionError,
+    AuthenticationError,
 }
 
 impl From<Error> for SecurityError {
@@ -48,4 +49,24 @@ pub fn hls_decrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8, 2048>, SecurityErr
     nonce.copy_from_slice(nonce_slice);
     let plaintext = cipher.decrypt(&nonce, ciphertext)?;
     Ok(Vec::from_slice(&plaintext).unwrap())
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    extern crate std;
+    use super::*;
+
+    #[test]
+    fn test_lls_authenticate() {
+        let password = b"password";
+        let challenge = b"challenge";
+        let expected_response = lls_authenticate(password, challenge).unwrap();
+
+        let correct_response = lls_authenticate(password, challenge).unwrap();
+        assert_eq!(expected_response, correct_response);
+
+        let wrong_password = b"wrong_password";
+        let wrong_response = lls_authenticate(wrong_password, challenge).unwrap();
+        assert_ne!(expected_response, wrong_response);
+    }
 }

@@ -1,0 +1,82 @@
+@startuml
+interface CosemObject {
+  +class_id(): u16
+  +get_attribute(attribute_id: i8): Option<Data>
+  +set_attribute(attribute_id: i8, data: Data): Option<()>
+  +invoke_method(method_id: i8, data: Data): Option<Data>
+}
+
+class Clock {
+  -time: Data
+  -time_zone: Data
+  -status: Data
+  -daylight_savings_begin: Data
+  -daylight_savings_end: Data
+  -daylight_savings_deviation: Data
+  -enabled: Data
+}
+
+class Register {
+  -value: Data
+  -scaler_unit: Data
+}
+
+class DemandRegister {
+  -current_average_value: Data
+  -last_average_value: Data
+  -scaler_unit: Data
+  -status: Data
+  -capture_time: Data
+  -start_time_current: Data
+  -period: Data
+  -number_of_periods: Data
+}
+
+class ExtendedRegister {
+  -value: Data
+  -scaler_unit: Data
+  -status: Data
+  -capture_time: Data
+}
+
+class SecuritySetup {
+  -security_policy: Data
+  -security_suite: Data
+  -client_system_title: Data
+  -server_system_title: Data
+}
+
+class AssociationLN {
+  -object_list: Vec<CosemObjectDescriptor>
+  -associated_partners_id: u16
+  -application_context_name: Vec<u8>
+  -xdlms_context_info: Vec<u8>
+  -authentication_mechanism_name: Vec<u8>
+}
+
+class ProfileGeneric {
+  -capture_buffer: Vec<Data>
+  -capture_objects: Vec<CosemObjectDescriptor>
+  -capture_period: u32
+  -sort_method: u8
+  -sort_object: CosemObjectDescriptor
+  -entries_in_use: u32
+  -profile_entries: u32
+}
+
+class DisconnectControl {
+  -state: bool
+  -transition: u8
+}
+
+
+CosemObject <|.. Clock
+CosemObject <|.. Register
+CosemObject <|.. DemandRegister
+CosemObject <|.. ExtendedRegister
+CosemObject <|.. SecuritySetup
+CosemObject <|.. AssociationLN
+CosemObject <|.. ProfileGeneric
+CosemObject <|.. DisconnectControl
+
+@enduml
