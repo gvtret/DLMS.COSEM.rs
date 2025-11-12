@@ -90,8 +90,10 @@ impl HdlcFrame {
             return Err(HdlcFrameError::InvalidFrame.into());
         }
 
-        let received_checksum_bytes: [u8; 2] =
-            [frame_body[frame_body.len() - 2], frame_body[frame_body.len() - 1]];
+        let received_checksum_bytes: [u8; 2] = [
+            frame_body[frame_body.len() - 2],
+            frame_body[frame_body.len() - 1],
+        ];
         let received_checksum = u16::from_le_bytes(received_checksum_bytes);
         let data_to_checksum = &frame_body[..frame_body.len() - 2];
         let calculated_checksum = CRC_ALGORITHM.checksum(data_to_checksum);
