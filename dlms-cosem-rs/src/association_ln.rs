@@ -1,5 +1,5 @@
-use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
+use crate::cosem_object::CosemObject;
 use crate::types::CosemData;
 use std::vec::Vec;
 
@@ -61,9 +61,13 @@ impl CosemObject for AssociationLN {
         match attribute_id {
             2 => Some(CosemData::OctetString(self.object_list.clone())),
             3 => Some(CosemData::DoubleLongUnsigned(self.associated_partners_id)),
-            4 => Some(CosemData::OctetString(self.application_context_name.clone())),
+            4 => Some(CosemData::OctetString(
+                self.application_context_name.clone(),
+            )),
             5 => Some(CosemData::OctetString(self.xdlms_context_info.clone())),
-            6 => Some(CosemData::OctetString(self.authentication_mechanism_name.clone())),
+            6 => Some(CosemData::OctetString(
+                self.authentication_mechanism_name.clone(),
+            )),
             _ => None,
         }
     }

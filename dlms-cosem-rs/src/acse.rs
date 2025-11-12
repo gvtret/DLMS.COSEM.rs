@@ -210,6 +210,126 @@ impl AareApdu {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArlrqApdu {
+    pub reason: Option<u8>,
+    pub user_information: Option<Vec<u8>>,
+}
+
+impl ArlrqApdu {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
+        let mut bytes = Vec::new();
+        bytes.push(0x62);
+
+        let mut content = Vec::new();
+
+        if let Some(reason) = self.reason {
+            content.push(0x80);
+            encode_length(&mut content, 1);
+            content.push(reason);
+        }
+
+        if let Some(user_information) = &self.user_information {
+            content.push(0xBE);
+            encode_length(&mut content, user_information.len());
+            content.extend_from_slice(user_information);
+        }
+
+        encode_length(&mut bytes, content.len());
+        bytes.extend_from_slice(&content);
+        Ok(bytes)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
+        let (i, _arlrq_tag) = tag(&[0x62u8][..]).parse(bytes)?;
+        let (i, length) = parse_length(i)?;
+        let (i, content) = take(length)(i)?;
+        let (content, reason) = parse_optional(content, 0x80)?;
+        let (_content, user_information) = parse_optional(content, 0xBE)?;
+
+        let reason = match reason {
+            Some(bytes) => {
+                if bytes.len() != 1 {
+                    return Err(Err::Error(nom::error::Error::new(
+                        bytes,
+                        ErrorKind::LengthValue,
+                    )));
+                }
+                Some(bytes[0])
+            }
+            None => None,
+        };
+
+        Ok((
+            i,
+            ArlrqApdu {
+                reason,
+                user_information: user_information.map(|ui| ui.to_vec()),
+            },
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArlreApdu {
+    pub reason: Option<u8>,
+    pub user_information: Option<Vec<u8>>,
+}
+
+impl ArlreApdu {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
+        let mut bytes = Vec::new();
+        bytes.push(0x63);
+
+        let mut content = Vec::new();
+
+        if let Some(reason) = self.reason {
+            content.push(0x80);
+            encode_length(&mut content, 1);
+            content.push(reason);
+        }
+
+        if let Some(user_information) = &self.user_information {
+            content.push(0xBE);
+            encode_length(&mut content, user_information.len());
+            content.extend_from_slice(user_information);
+        }
+
+        encode_length(&mut bytes, content.len());
+        bytes.extend_from_slice(&content);
+        Ok(bytes)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
+        let (i, _arlre_tag) = tag(&[0x63u8][..]).parse(bytes)?;
+        let (i, length) = parse_length(i)?;
+        let (i, content) = take(length)(i)?;
+        let (content, reason) = parse_optional(content, 0x80)?;
+        let (_content, user_information) = parse_optional(content, 0xBE)?;
+
+        let reason = match reason {
+            Some(bytes) => {
+                if bytes.len() != 1 {
+                    return Err(Err::Error(nom::error::Error::new(
+                        bytes,
+                        ErrorKind::LengthValue,
+                    )));
+                }
+                Some(bytes[0])
+            }
+            None => None,
+        };
+
+        Ok((
+            i,
+            ArlreApdu {
+                reason,
+                user_information: user_information.map(|ui| ui.to_vec()),
+            },
+        ))
+    }
+}
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
     extern crate std;
@@ -318,5 +438,29 @@ mod tests {
             parsed.responding_authentication_value,
             Some(responding_authentication_value)
         );
+    }
+
+    #[test]
+    fn arlrq_round_trip() {
+        let apdu = ArlrqApdu {
+            reason: Some(0),
+            user_information: Some(vec![0x01, 0x02, 0x03]),
+        };
+
+        let encoded = apdu.to_bytes().expect("failed to encode A-RLRQ");
+        let (_, decoded) = ArlrqApdu::from_bytes(&encoded).expect("failed to decode A-RLRQ");
+        assert_eq!(decoded, apdu);
+    }
+
+    #[test]
+    fn arlre_round_trip() {
+        let apdu = ArlreApdu {
+            reason: Some(0),
+            user_information: None,
+        };
+
+        let encoded = apdu.to_bytes().expect("failed to encode A-RLRE");
+        let (_, decoded) = ArlreApdu::from_bytes(&encoded).expect("failed to decode A-RLRE");
+        assert_eq!(decoded, apdu);
     }
 }
