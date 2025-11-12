@@ -4,7 +4,8 @@ use crate::hdlc::HdlcFrame;
 use crate::security::{hls_decrypt, hls_encrypt, lls_authenticate, SecurityError};
 use crate::transport::Transport;
 use crate::xdlms::{
-    ActionRequest, ActionResponse, GetRequest, GetResponse, SetRequest, SetResponse,
+    ActionRequest, ActionResponse, GetRequest, GetResponse, InitiateRequest, InitiateResponse,
+    SetRequest, SetResponse,
 };
 use std::vec::Vec;
 
@@ -51,12 +52,22 @@ impl<T: Transport> Client<T> {
     }
 
     pub fn associate(&mut self) -> Result<AareApdu, ClientError<T::Error>> {
+        let initiate_request = InitiateRequest {
+            dedicated_key: None,
+            response_allowed: true,
+            proposed_quality_of_service: None,
+            proposed_dlms_version_number: 6,
+            proposed_conformance: crate::xdlms::Conformance { value: 0x0010_0000 },
+            client_max_receive_pdu_size: 0x0400,
+        };
+        let user_information = initiate_request.to_user_information()?;
+
         let mut aarq = AarqApdu {
             application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
             sender_acse_requirements: 0,
             mechanism_name: None,
             calling_authentication_value: None,
-            user_information: Vec::new(),
+            user_information: user_information.clone(),
         };
         if self.password.is_some() {
             aarq.mechanism_name = Some(b"LLS".to_vec());
@@ -76,6 +87,7 @@ impl<T: Transport> Client<T> {
         let aare = AareApdu::from_bytes(&response_frame.information)
             .map_err(|_| ClientError::AcseError)?
             .1;
+        let _ = InitiateResponse::from_user_information(&aare.user_information)?;
 
         if let (Some(password), Some(challenge)) = (
             &self.password,
@@ -87,7 +99,7 @@ impl<T: Transport> Client<T> {
                 sender_acse_requirements: 0,
                 mechanism_name: Some(b"LLS".to_vec()),
                 calling_authentication_value: Some(response),
-                user_information: Vec::new(),
+                user_information,
             };
 
             let request_bytes = aarq.to_bytes()?;
@@ -102,6 +114,7 @@ impl<T: Transport> Client<T> {
             let aare = AareApdu::from_bytes(&response_frame.information)
                 .map_err(|_| ClientError::AcseError)?
                 .1;
+            let _ = InitiateResponse::from_user_information(&aare.user_information)?;
             return Ok(aare);
         }
 
