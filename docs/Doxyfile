@@ -1,0 +1,27 @@
+# Doxyfile configuration for DLMS.COSEM.rs project documentation
+
+PROJECT_NAME           = "DLMS COSEM Stack"
+OUTPUT_DIRECTORY       = docs/generated
+CREATE_SUBDIRS         = YES
+OUTPUT_LANGUAGE        = English
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+GENERATE_XML           = NO
+RECURSIVE              = YES
+INPUT                  = dlms-cosem-rs/src
+FILE_PATTERNS          = *.rs
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+FULL_PATH_NAMES        = NO
+STRIP_FROM_PATH        = dlms-cosem-rs/src
+ALIASES                = "plantuml=\"\""
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+DOT_CLEANUP            = YES

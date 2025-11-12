@@ -132,12 +132,11 @@ impl GetRequest {
                     let mut instance_id_bytes = [0u8; 6];
                     instance_id_bytes.copy_from_slice(instance_id);
 
-                    attribute_descriptor_list
-                        .push(CosemAttributeDescriptor {
-                            class_id: u16::from_be_bytes(class_id_bytes),
-                            instance_id: instance_id_bytes,
-                            attribute_id: attribute_id[0] as i8,
-                        });
+                    attribute_descriptor_list.push(CosemAttributeDescriptor {
+                        class_id: u16::from_be_bytes(class_id_bytes),
+                        instance_id: instance_id_bytes,
+                        attribute_id: attribute_id[0] as i8,
+                    });
                 }
                 Ok(GetRequest::WithList(GetRequestWithList {
                     invoke_id_and_priority: invoke_id_and_priority[0],
@@ -174,17 +173,18 @@ mod tests {
 
     #[test]
     fn test_get_request_with_list_serialization_deserialization() {
-        let mut list = Vec::new();
-        list.push(CosemAttributeDescriptor {
-            class_id: 8,
-            instance_id: [0, 0, 1, 0, 0, 255],
-            attribute_id: 2,
-        });
-        list.push(CosemAttributeDescriptor {
-            class_id: 3,
-            instance_id: [0, 0, 2, 0, 0, 255],
-            attribute_id: 3,
-        });
+        let list = vec![
+            CosemAttributeDescriptor {
+                class_id: 8,
+                instance_id: [0, 0, 1, 0, 0, 255],
+                attribute_id: 2,
+            },
+            CosemAttributeDescriptor {
+                class_id: 3,
+                instance_id: [0, 0, 2, 0, 0, 255],
+                attribute_id: 3,
+            },
+        ];
 
         let req = GetRequest::WithList(GetRequestWithList {
             invoke_id_and_priority: 1,
@@ -212,11 +212,10 @@ mod tests {
 
     #[test]
     fn test_get_response_with_list_serialization_deserialization() {
-        let mut list = Vec::new();
-        list.push(GetDataResult::Data(CosemData::NullData));
-        list.push(GetDataResult::DataAccessResult(
-            DataAccessResult::Success,
-        ));
+        let list = vec![
+            GetDataResult::Data(CosemData::NullData),
+            GetDataResult::DataAccessResult(DataAccessResult::Success),
+        ];
 
         let res = GetResponse::WithList(GetResponseWithList {
             invoke_id_and_priority: 1,
