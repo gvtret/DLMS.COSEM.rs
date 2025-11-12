@@ -24,13 +24,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Install stable Rust
-      id: toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
-        components: rustfmt, clippy
+    - name: Install Rust toolchains
+      run: |
+        rustup toolchain install stable --profile minimal
+        rustup toolchain install nightly --profile minimal
+        rustup component add --toolchain stable rustfmt
+        rustup component add --toolchain stable clippy
+        rustup default stable
 
     - name: Cache cargo registry and build
       uses: actions/cache@v4
