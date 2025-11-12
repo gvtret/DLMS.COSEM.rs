@@ -1,5 +1,5 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::types::Data as CosemData;
+use crate::types::CosemData;
 
 pub trait CosemObject: Send {
     fn class_id(&self) -> u16;

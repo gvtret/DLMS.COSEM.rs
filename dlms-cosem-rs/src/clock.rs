@@ -1,6 +1,6 @@
 use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::types::Data as CosemData;
+use crate::types::CosemData;
 
 #[derive(Debug)]
 pub struct Clock {

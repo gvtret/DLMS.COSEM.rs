@@ -1,6 +1,6 @@
 use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::types::Data as CosemData;
+use crate::types::CosemData;
 use std::vec::Vec;
 
 /// Association LN (Class ID 15)

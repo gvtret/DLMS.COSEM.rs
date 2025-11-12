@@ -185,7 +185,7 @@ impl<T: Transport> Server<T> {
                 };
 
                 let result =
-                    object.invoke_method(action_req.cosem_method_descriptor.method_id as i8, action_req.method_invocation_parameters.unwrap_or(crate::types::Data::NullData));
+                    object.invoke_method(action_req.cosem_method_descriptor.method_id as i8, action_req.method_invocation_parameters.unwrap_or(crate::types::CosemData::NullData));
                 let action_res = ActionResponse::Normal(ActionResponseNormal {
                     invoke_id_and_priority: action_req.invoke_id_and_priority,
                     single_response: crate::xdlms::ActionResponseWithOptionalData {

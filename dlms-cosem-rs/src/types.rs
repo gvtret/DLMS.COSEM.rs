@@ -1,10 +1,10 @@
 use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Data {
+pub enum CosemData {
     NullData,
-    Array(Vec<Data>),
-    Structure(Vec<Data>),
+    Array(Vec<CosemData>),
+    Structure(Vec<CosemData>),
     Boolean(bool),
     BitString(Vec<u8>),
     DoubleLong(i32),
@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn test_data_enum() {
-        let data = Data::Array(Vec::new());
+        let data = CosemData::Array(Vec::new());
         let cloned_data = data.clone();
         assert_eq!(data, cloned_data);
     }

@@ -1,6 +1,6 @@
 use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::types::Data as CosemData;
+use crate::types::CosemData;
 
 #[derive(Debug)]
 pub struct ExtendedRegister {
@@ -13,8 +13,8 @@ pub struct ExtendedRegister {
 impl ExtendedRegister {
     pub fn new() -> Self {
         Self {
-            value: CosemData::NullData,
-            scaler_unit: CosemData::NullData,
+            value: CosemData::Unsigned(0),
+            scaler_unit: CosemData::Structure(vec![CosemData::Integer(0), CosemData::Enum(255)]),
             status: CosemData::NullData,
             capture_time: CosemData::NullData,
         }
@@ -70,10 +70,20 @@ impl CosemObject for ExtendedRegister {
 
     fn invoke_method(
         &mut self,
-        _method_id: CosemObjectMethodId,
+        method_id: CosemObjectMethodId,
         _data: CosemData,
     ) -> Option<CosemData> {
-        None
+        match method_id {
+            1 => self.reset(),
+            _ => None,
+        }
+    }
+}
+
+impl ExtendedRegister {
+    fn reset(&mut self) -> Option<CosemData> {
+        self.value = CosemData::Unsigned(0);
+        Some(CosemData::NullData)
     }
 }
 
@@ -85,9 +95,35 @@ mod tests {
     #[test]
     fn test_extended_register_new() {
         let register = ExtendedRegister::new();
-        assert_eq!(register.get_attribute(2), Some(CosemData::NullData));
-        assert_eq!(register.get_attribute(3), Some(CosemData::NullData));
+        assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(0)));
+        assert_eq!(
+            register.get_attribute(3),
+            Some(CosemData::Structure(vec![
+                CosemData::Integer(0),
+                CosemData::Enum(255)
+            ]))
+        );
         assert_eq!(register.get_attribute(4), Some(CosemData::NullData));
         assert_eq!(register.get_attribute(5), Some(CosemData::NullData));
+    }
+
+    #[test]
+    fn test_extended_register_set_get() {
+        let mut register = ExtendedRegister::new();
+        register
+            .set_attribute(2, CosemData::Unsigned(10))
+            .unwrap();
+        assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(10)));
+    }
+
+    #[test]
+    fn test_extended_register_reset() {
+        let mut register = ExtendedRegister::new();
+        register
+            .set_attribute(2, CosemData::Unsigned(10))
+            .unwrap();
+        assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(10)));
+        register.reset();
+        assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(0)));
     }
 }
