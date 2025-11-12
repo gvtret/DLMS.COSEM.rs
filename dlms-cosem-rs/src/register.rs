@@ -1,5 +1,5 @@
-use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
+use crate::cosem_object::CosemObject;
 use crate::types::CosemData;
 
 #[derive(Debug)]
@@ -94,18 +94,14 @@ mod tests {
     #[test]
     fn test_register_set_get() {
         let mut register = Register::new();
-        register
-            .set_attribute(2, CosemData::Unsigned(10))
-            .unwrap();
+        register.set_attribute(2, CosemData::Unsigned(10)).unwrap();
         assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(10)));
     }
 
     #[test]
     fn test_register_reset() {
         let mut register = Register::new();
-        register
-            .set_attribute(2, CosemData::Unsigned(10))
-            .unwrap();
+        register.set_attribute(2, CosemData::Unsigned(10)).unwrap();
         assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(10)));
         register.reset();
         assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(0)));
