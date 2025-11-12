@@ -223,7 +223,6 @@ mod tests {
     extern crate std;
     use super::*;
 
-    #[derive(Default)]
     struct DummyTransport;
 
     impl Transport for DummyTransport {
@@ -257,12 +256,7 @@ mod tests {
 
     #[test]
     fn lls_challenge_is_issued_and_persisted() {
-        let mut server = Server::new(
-            0x0001,
-            DummyTransport::default(),
-            Some(b"password".to_vec()),
-            None,
-        );
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
         let aarq = AarqApdu {
             application_context_name: b"CTX".to_vec(),
@@ -297,12 +291,7 @@ mod tests {
 
     #[test]
     fn lls_challenge_response_validates_and_clears() {
-        let mut server = Server::new(
-            0x0001,
-            DummyTransport::default(),
-            Some(b"password".to_vec()),
-            None,
-        );
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
         let association_address = 0x0003;
         let aarq = AarqApdu {
@@ -349,6 +338,57 @@ mod tests {
 
         assert_eq!(aare.result, 0);
         assert!(aare.responding_authentication_value.is_none());
-        assert!(server.lls_challenges.get(&association_address).is_none());
+        assert!(!server.lls_challenges.contains_key(&association_address));
+    }
+
+    #[test]
+    fn lls_challenge_response_with_wrong_mac_fails() {
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
+
+        let association_address = 0x0004;
+        let initial_request = build_hdlc_request(
+            association_address,
+            AarqApdu {
+                application_context_name: b"CTX".to_vec(),
+                sender_acse_requirements: 0,
+                mechanism_name: Some(b"LLS".to_vec()),
+                calling_authentication_value: None,
+                user_information: b"info".to_vec(),
+            },
+        );
+
+        let initial_response = server
+            .handle_request(&initial_request)
+            .expect("server failed to issue challenge");
+        let issued_challenge = parse_aare(&initial_response)
+            .responding_authentication_value
+            .expect("expected challenge");
+
+        let mut wrong_response =
+            lls_authenticate(b"password", &issued_challenge).expect("failed to compute mac");
+        wrong_response[0] ^= 0xFF;
+
+        let follow_up_response = server
+            .handle_request(&build_hdlc_request(
+                association_address,
+                AarqApdu {
+                    application_context_name: b"CTX".to_vec(),
+                    sender_acse_requirements: 0,
+                    mechanism_name: Some(b"LLS".to_vec()),
+                    calling_authentication_value: Some(wrong_response),
+                    user_information: b"info".to_vec(),
+                },
+            ))
+            .expect("server failed to process response");
+
+        let aare = parse_aare(&follow_up_response);
+
+        assert_eq!(aare.result, 1);
+        assert!(aare.responding_authentication_value.is_none());
+        assert!(!server
+            .lls_challenges
+            .get(&association_address)
+            .expect("challenge should remain for retry")
+            .is_empty());
     }
 }
