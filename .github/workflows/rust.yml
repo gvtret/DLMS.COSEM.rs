@@ -15,40 +15,15 @@ defaults:
     shell: bash
 
 jobs:
-  setup:
-    name: Setup Rust toolchain
-    runs-on: ubuntu-latest
-    outputs:
-      toolchain: ${{ steps.toolchain.outputs.toolchain }}
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-
-    - name: Install Rust toolchains
-      run: |
-        rustup toolchain install stable --profile minimal
-        rustup toolchain install nightly --profile minimal
-        rustup component add --toolchain stable rustfmt
-        rustup component add --toolchain stable clippy
-        rustup default stable
-
-    - name: Cache cargo registry and build
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
   fmt:
     name: Formatting check
     runs-on: ubuntu-latest
-    needs: setup
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
     - name: Restore cache
       uses: actions/cache@v4
       with:
@@ -63,9 +38,12 @@ jobs:
   clippy:
     name: Lint check
     runs-on: ubuntu-latest
-    needs: setup
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
     - name: Restore cache
       uses: actions/cache@v4
       with:
@@ -83,6 +61,8 @@ jobs:
     needs: [fmt, clippy]
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
     - name: Restore cache
       uses: actions/cache@v4
       with:
@@ -100,6 +80,8 @@ jobs:
     needs: build
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
     - name: Restore cache
       uses: actions/cache@v4
       with:
@@ -114,9 +96,10 @@ jobs:
   audit:
     name: Security audit
     runs-on: ubuntu-latest
-    needs: setup
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
     - name: Install cargo-audit
       run: cargo install cargo-audit --locked
     - name: Run cargo-audit
@@ -125,10 +108,24 @@ jobs:
   deny:
     name: Dependency policy check
     runs-on: ubuntu-latest
-    needs: setup
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
     - name: Install cargo-deny
       run: cargo install cargo-deny --locked
     - name: Run cargo-deny
       run: cd dlms-cosem-rs && cargo deny check
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install Doxygen and Graphviz
+      run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+    - name: Generate documentation
+      run: doxygen docs/Doxyfile
