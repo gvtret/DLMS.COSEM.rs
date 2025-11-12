@@ -1,14 +1,52 @@
 use crate::error::DlmsError;
 use nom::bytes::complete::{tag, take};
-use nom::{IResult, Parser};
+use nom::error::ErrorKind;
+use nom::number::complete::u8 as parse_u8;
+use nom::{Err, IResult, Parser};
 use std::vec::Vec;
+
+fn parse_length(input: &[u8]) -> IResult<&[u8], usize> {
+    let (input, first_byte) = parse_u8(input)?;
+    if first_byte & 0x80 == 0 {
+        Ok((input, first_byte as usize))
+    } else {
+        let num_bytes = (first_byte & 0x7F) as usize;
+        if num_bytes == 0 {
+            return Err(Err::Error(nom::error::Error::new(
+                input,
+                ErrorKind::LengthValue,
+            )));
+        }
+        let (input, len_bytes) = take(num_bytes)(input)?;
+        let mut length = 0usize;
+        for &byte in len_bytes {
+            length = (length << 8) | byte as usize;
+        }
+        Ok((input, length))
+    }
+}
+
+fn encode_length(buf: &mut Vec<u8>, length: usize) {
+    if length < 0x80 {
+        buf.push(length as u8);
+    } else {
+        let mut bytes = Vec::new();
+        let mut value = length;
+        while value > 0 {
+            bytes.push((value & 0xFF) as u8);
+            value >>= 8;
+        }
+        bytes.reverse();
+        buf.push(0x80 | (bytes.len() as u8));
+        buf.extend_from_slice(&bytes);
+    }
+}
 
 fn parse_optional(input: &[u8], tag_byte: u8) -> IResult<&[u8], Option<&[u8]>> {
     if let Some(&first) = input.first() {
         if first == tag_byte {
             let (input, _) = tag(&[tag_byte][..]).parse(input)?;
-            let (input, len_bytes) = take(1usize)(input)?;
-            let length = len_bytes[0] as usize;
+            let (input, length) = parse_length(input)?;
             let (input, value) = take(length)(input)?;
             Ok((input, Some(value)))
         } else {
@@ -35,48 +73,48 @@ impl AarqApdu {
 
         let mut content = Vec::new();
         content.push(0xA1);
-        content.push(self.application_context_name.len() as u8);
+        encode_length(&mut content, self.application_context_name.len());
         content.extend_from_slice(&self.application_context_name);
         content.push(0x8A);
-        content.push(0x01);
+        encode_length(&mut content, 1);
         content.push(self.sender_acse_requirements);
 
         if let Some(mechanism_name) = &self.mechanism_name {
             content.push(0x8B);
-            content.push(mechanism_name.len() as u8);
+            encode_length(&mut content, mechanism_name.len());
             content.extend_from_slice(mechanism_name);
         }
 
         if let Some(calling_authentication_value) = &self.calling_authentication_value {
             content.push(0xAC);
-            content.push(calling_authentication_value.len() as u8);
+            encode_length(&mut content, calling_authentication_value.len());
             content.extend_from_slice(calling_authentication_value);
         }
 
         content.push(0xBE);
-        content.push(self.user_information.len() as u8);
+        encode_length(&mut content, self.user_information.len());
         content.extend_from_slice(&self.user_information);
 
-        bytes.push(content.len() as u8);
+        encode_length(&mut bytes, content.len());
         bytes.extend_from_slice(&content);
         Ok(bytes)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
         let (i, _aarq_tag) = tag(&[0x60u8][..]).parse(bytes)?;
-        let (i, len) = take(1usize)(i)?;
-        let (i, content) = take(len[0] as usize)(i)?;
+        let (i, length) = parse_length(i)?;
+        let (i, content) = take(length)(i)?;
         let (content, _acn_tag) = tag(&[0xA1u8][..]).parse(content)?;
-        let (content, acn_len) = take(1usize)(content)?;
-        let (content, acn) = take(acn_len[0] as usize)(content)?;
+        let (content, acn_len) = parse_length(content)?;
+        let (content, acn) = take(acn_len)(content)?;
         let (content, _sar_tag) = tag(&[0x8Au8][..]).parse(content)?;
-        let (content, _sar_len) = take(1usize)(content)?;
-        let (content, sar) = take(1usize)(content)?;
+        let (content, sar_len) = parse_length(content)?;
+        let (content, sar) = take(sar_len)(content)?;
         let (content, mn) = parse_optional(content, 0x8B)?;
         let (content, cav) = parse_optional(content, 0xAC)?;
         let (content, _ui_tag) = tag(&[0xBEu8][..]).parse(content)?;
-        let (content, ui_len) = take(1usize)(content)?;
-        let (_content, ui) = take(ui_len[0] as usize)(content)?;
+        let (content, ui_len) = parse_length(content)?;
+        let (_content, ui) = take(ui_len)(content)?;
 
         let mut aarq = AarqApdu {
             application_context_name: acn.to_vec(),
@@ -114,47 +152,47 @@ impl AareApdu {
 
         let mut content = Vec::new();
         content.push(0xA1);
-        content.push(self.application_context_name.len() as u8);
+        encode_length(&mut content, self.application_context_name.len());
         content.extend_from_slice(&self.application_context_name);
         content.push(0xA2);
-        content.push(0x01);
+        encode_length(&mut content, 1);
         content.push(self.result);
         content.push(0xA3);
-        content.push(0x01);
+        encode_length(&mut content, 1);
         content.push(self.result_source_diagnostic);
 
         if let Some(responding_authentication_value) = &self.responding_authentication_value {
             content.push(0xAC);
-            content.push(responding_authentication_value.len() as u8);
+            encode_length(&mut content, responding_authentication_value.len());
             content.extend_from_slice(responding_authentication_value);
         }
 
         content.push(0xBE);
-        content.push(self.user_information.len() as u8);
+        encode_length(&mut content, self.user_information.len());
         content.extend_from_slice(&self.user_information);
 
-        bytes.push(content.len() as u8);
+        encode_length(&mut bytes, content.len());
         bytes.extend_from_slice(&content);
         Ok(bytes)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> IResult<&[u8], Self> {
         let (i, _aare_tag) = tag(&[0x61u8][..]).parse(bytes)?;
-        let (i, len) = take(1usize)(i)?;
-        let (i, content) = take(len[0] as usize)(i)?;
+        let (i, length) = parse_length(i)?;
+        let (i, content) = take(length)(i)?;
         let (content, _acn_tag) = tag(&[0xA1u8][..]).parse(content)?;
-        let (content, acn_len) = take(1usize)(content)?;
-        let (content, acn) = take(acn_len[0] as usize)(content)?;
+        let (content, acn_len) = parse_length(content)?;
+        let (content, acn) = take(acn_len)(content)?;
         let (content, _res_tag) = tag(&[0xA2u8][..]).parse(content)?;
-        let (content, _res_len) = take(1usize)(content)?;
-        let (content, res) = take(1usize)(content)?;
+        let (content, res_len) = parse_length(content)?;
+        let (content, res) = take(res_len)(content)?;
         let (content, _rsd_tag) = tag(&[0xA3u8][..]).parse(content)?;
-        let (content, _rsd_len) = take(1usize)(content)?;
-        let (content, rsd) = take(1usize)(content)?;
+        let (content, rsd_len) = parse_length(content)?;
+        let (content, rsd) = take(rsd_len)(content)?;
         let (content, rav) = parse_optional(content, 0xAC)?;
         let (content, _ui_tag) = tag(&[0xBEu8][..]).parse(content)?;
-        let (content, ui_len) = take(1usize)(content)?;
-        let (_content, ui) = take(ui_len[0] as usize)(content)?;
+        let (content, ui_len) = parse_length(content)?;
+        let (_content, ui) = take(ui_len)(content)?;
 
         let mut aare = AareApdu {
             application_context_name: acn.to_vec(),
@@ -208,6 +246,31 @@ mod tests {
     }
 
     #[test]
+    fn test_aarq_apdu_with_long_optionals_roundtrip() {
+        let mechanism_name: Vec<u8> = (0..300).map(|i| (i % 256) as u8).collect();
+        let calling_authentication_value: Vec<u8> = (0..260)
+            .map(|i| 255u8.wrapping_sub((i % 256) as u8))
+            .collect();
+
+        let aarq = AarqApdu {
+            application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: Some(mechanism_name.clone()),
+            calling_authentication_value: Some(calling_authentication_value.clone()),
+            user_information: b"user_info".to_vec(),
+        };
+
+        let bytes = aarq.to_bytes().unwrap();
+        let parsed = AarqApdu::from_bytes(&bytes).unwrap().1;
+
+        assert_eq!(parsed.mechanism_name, Some(mechanism_name));
+        assert_eq!(
+            parsed.calling_authentication_value,
+            Some(calling_authentication_value)
+        );
+    }
+
+    #[test]
     fn test_aare_apdu_serialization_deserialization() {
         let aare = AareApdu {
             application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
@@ -234,5 +297,26 @@ mod tests {
 
         let bytes = aare.to_bytes().unwrap();
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_aare_apdu_with_long_optional_roundtrip() {
+        let responding_authentication_value: Vec<u8> = (0..260).map(|i| (i % 200) as u8).collect();
+
+        let aare = AareApdu {
+            application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
+            result: 0,
+            result_source_diagnostic: 0,
+            responding_authentication_value: Some(responding_authentication_value.clone()),
+            user_information: b"user_info".to_vec(),
+        };
+
+        let bytes = aare.to_bytes().unwrap();
+        let parsed = AareApdu::from_bytes(&bytes).unwrap().1;
+
+        assert_eq!(
+            parsed.responding_authentication_value,
+            Some(responding_authentication_value)
+        );
     }
 }

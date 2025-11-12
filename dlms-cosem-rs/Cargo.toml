@@ -35,3 +35,23 @@ panic = "abort"
 
 [profile.dev]
 panic = "abort"
+
+[[test]]
+name = "association_ln_test"
+path = "tests/association_ln_test.rs"
+required-features = ["std"]
+
+[[test]]
+name = "conformance_yellow_book"
+path = "tests/conformance_yellow_book.rs"
+required-features = ["std"]
+
+[[test]]
+name = "data_test"
+path = "tests/data_test.rs"
+required-features = ["std"]
+
+[[test]]
+name = "integration_test"
+path = "tests/integration_test.rs"
+required-features = ["std"]
