@@ -1,5 +1,11 @@
 @startuml
-!theme vibrant
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam class {
+  BackgroundColor #F9FBFF
+  ArrowColor #1F2A38
+  BorderColor #1F2A38
+}
 
 class SecuritySetup {
   - security_policy: u8

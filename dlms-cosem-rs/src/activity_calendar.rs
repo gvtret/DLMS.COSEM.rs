@@ -1,5 +1,5 @@
-use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
+use crate::cosem_object::CosemObject;
 use crate::types::CosemData;
 
 #[derive(Debug)]

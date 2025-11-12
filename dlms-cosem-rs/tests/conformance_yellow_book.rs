@@ -1,17 +1,20 @@
 #![cfg(feature = "std")]
 
 use dlms_cosem::client::Client;
-use dlms_cosem::hdlc_transport::HdlcTransport;
-use dlms_cosem::server::Server;
 use dlms_cosem::cosem::{CosemAttributeDescriptor, CosemMethodDescriptor};
 use dlms_cosem::cosem_object::CosemObject;
+use dlms_cosem::hdlc_transport::HdlcTransport;
 use dlms_cosem::register::Register;
+use dlms_cosem::server::Server;
 use dlms_cosem::types::CosemData;
-use dlms_cosem::xdlms::{GetRequest, GetRequestNormal, SetRequest, SetRequestNormal, ActionRequest, ActionRequestNormal};
+use dlms_cosem::xdlms::{
+    ActionRequest, ActionRequestNormal, GetRequest, GetRequestNormal, SetRequest, SetRequestNormal,
+};
+use std::boxed::Box;
 use std::io::{Read, Write};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::boxed::Box;
 use std::vec::Vec;
 
 struct MockStream {
@@ -215,7 +218,7 @@ fn yellow_book_conformance_test_action_request() {
 
     let instance_id = [0, 0, 15, 0, 0, 255];
     let association_ln = dlms_cosem::association_ln::AssociationLN::new(
-        Vec::new(),
+        Arc::new(Mutex::new(Vec::new())),
         0,
         Vec::new(),
         Vec::new(),
@@ -243,8 +246,13 @@ fn yellow_book_conformance_test_action_request() {
 
     let res = client.send_action_request(req).unwrap();
     if let dlms_cosem::xdlms::ActionResponse::Normal(res) = res {
-        assert_eq!(res.single_response.result, dlms_cosem::xdlms::ActionResult::Success);
-        if let Some(dlms_cosem::xdlms::GetDataResult::Data(CosemData::OctetString(response))) = res.single_response.return_parameters {
+        assert_eq!(
+            res.single_response.result,
+            dlms_cosem::xdlms::ActionResult::Success
+        );
+        if let Some(dlms_cosem::xdlms::GetDataResult::Data(CosemData::OctetString(response))) =
+            res.single_response.return_parameters
+        {
             assert_eq!(response.as_slice(), b"server_response");
         } else {
             panic!("Incorrect response type");
