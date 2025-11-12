@@ -1,0 +1,21 @@
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "GPL-2.0",
+    "GPL-3.0",
+]
+confidence-threshold = 0.8
+exceptions = [
+    { allow = ["BSD-3-Clause"], crate = "dlms-cosem-rs" },
+    { allow = ["BSD-3-Clause"], crate = "subtle" },
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

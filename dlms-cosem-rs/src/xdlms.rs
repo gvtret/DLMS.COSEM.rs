@@ -1136,26 +1136,6 @@ impl AssociationParameters {
     }
 }
 
-impl Conformance {
-    pub fn to_bytes(&self) -> [u8; 3] {
-        [
-            ((self.value >> 16) & 0xFF) as u8,
-            ((self.value >> 8) & 0xFF) as u8,
-            (self.value & 0xFF) as u8,
-        ]
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DlmsError> {
-        if bytes.len() < 3 {
-            return Err(DlmsError::Xdlms);
-        }
-
-        Ok(Conformance {
-            value: ((bytes[0] as u32) << 16) | ((bytes[1] as u32) << 8) | bytes[2] as u32,
-        })
-    }
-}
-
 // --- Set-Response ---
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetResponseNormal {
