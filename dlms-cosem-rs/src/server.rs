@@ -163,11 +163,17 @@ impl<T: Transport> Server<T> {
                                     } else {
                                         aare.result = 1; // failure
                                     }
+                                    Err(_) => aare.result = 1, // failure
                                 }
-                                Err(_) => aare.result = 1, // failure
+                            } else {
+                                aare.result = 1; // failure due to missing challenge
                             }
                         } else {
-                            aare.result = 1; // failure due to missing challenge
+                            let mut challenge = vec![0u8; 16];
+                            OsRng.fill_bytes(&mut challenge);
+                            self.lls_challenges
+                                .insert(association_address, challenge.clone());
+                            aare.responding_authentication_value = Some(challenge);
                         }
                     } else {
                         let mut challenge = vec![0u8; 16];
@@ -254,26 +260,6 @@ impl<T: Transport> Server<T> {
             else {
                 return Err(ServerError::DlmsError(DlmsError::Xdlms));
             };
-
-            let result = object.invoke_method(
-                action_req.cosem_method_descriptor.method_id,
-                action_req
-                    .method_invocation_parameters
-                    .unwrap_or(crate::types::CosemData::NullData),
-            );
-            let action_res = ActionResponse::Normal(ActionResponseNormal {
-                invoke_id_and_priority: action_req.invoke_id_and_priority,
-                single_response: crate::xdlms::ActionResponseWithOptionalData {
-                    result: result
-                        .as_ref()
-                        .map_or(ActionResult::ObjectUnavailable, |_| ActionResult::Success),
-                    return_parameters: result.map(GetDataResult::Data),
-                },
-            });
-            action_res.to_bytes()?
-        } else {
-            return Err(ServerError::DlmsError(DlmsError::Xdlms));
-        };
 
         let response_hdlc_frame = HdlcFrame {
             address: self.address,
