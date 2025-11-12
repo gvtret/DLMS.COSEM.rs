@@ -210,11 +210,17 @@ impl<T: Transport> Server<T> {
                                     } else {
                                         aare.result = 1; // failure
                                     }
+                                    Err(_) => aare.result = 1, // failure
                                 }
-                                Err(_) => aare.result = 1, // failure
+                            } else {
+                                aare.result = 1; // failure due to missing challenge
                             }
                         } else {
-                            aare.result = 1; // failure due to missing challenge
+                            let mut challenge = vec![0u8; 16];
+                            OsRng.fill_bytes(&mut challenge);
+                            self.lls_challenges
+                                .insert(association_address, challenge.clone());
+                            aare.responding_authentication_value = Some(challenge);
                         }
                     } else {
                         let mut challenge = vec![0u8; 16];
