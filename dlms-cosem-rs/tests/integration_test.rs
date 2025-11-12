@@ -73,6 +73,9 @@ fn test_association() {
         .expect("expected negotiated parameters");
     assert_eq!(negotiated.negotiated_dlms_version_number, 6);
     assert_eq!(negotiated.negotiated_conformance.value, 0x0010_0000);
+
+    client.release().expect("Release failed");
+    assert!(client.negotiated_parameters().is_none());
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use crate::acse::{AareApdu, AarqApdu};
+use crate::acse::{AareApdu, AarqApdu, ArlreApdu, ArlrqApdu};
 use crate::cosem_object::CosemObject;
 use crate::error::DlmsError;
 use crate::hdlc::{HdlcFrame, HdlcFrameError};
@@ -194,6 +194,17 @@ impl<T: Transport> Server<T> {
                 );
             }
             aare.to_bytes()?
+        } else if let Ok((_, release_req)) = ArlrqApdu::from_bytes(&request_frame.information) {
+            self.active_associations.remove(&request_frame.address);
+            self.lls_challenges.remove(&request_frame.address);
+
+            let reason = release_req.reason.unwrap_or(0);
+            let rlre = ArlreApdu {
+                reason: Some(reason),
+                user_information: release_req.user_information,
+            };
+
+            rlre.to_bytes()?
         } else if let Ok(get_req) = GetRequest::from_bytes(&request_frame.information) {
             let GetRequest::Normal(get_req) = get_req else {
                 return Err(ServerError::DlmsError(DlmsError::Xdlms));
@@ -367,6 +378,13 @@ mod tests {
         let frame = HdlcFrame::from_bytes(bytes).expect("failed to decode frame");
         AareApdu::from_bytes(&frame.information)
             .expect("failed to decode aare")
+            .1
+    }
+
+    fn parse_rlre(bytes: &[u8]) -> ArlreApdu {
+        let frame = HdlcFrame::from_bytes(bytes).expect("failed to decode frame");
+        ArlreApdu::from_bytes(&frame.information)
+            .expect("failed to decode rlre")
             .1
     }
 
@@ -726,5 +744,91 @@ mod tests {
             .get(&association_address)
             .expect("challenge should remain for retry")
             .is_empty());
+    }
+
+    #[test]
+    fn release_request_clears_active_association() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: None,
+            calling_authentication_value: None,
+            user_information: default_initiate_request()
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&build_hdlc_request(0x0001, aarq))
+            .expect("failed to handle aarq");
+        let aare = parse_aare(&response_bytes);
+        assert_eq!(aare.result, 0);
+        assert!(server.active_associations.contains_key(&0x0001));
+
+        let release_req = ArlrqApdu {
+            reason: Some(0),
+            user_information: None,
+        };
+
+        let frame = HdlcFrame {
+            address: 0x0001,
+            control: 0,
+            information: release_req
+                .to_bytes()
+                .expect("failed to encode release request"),
+        };
+
+        let release_frame = frame.to_bytes().expect("failed to encode frame");
+        let response_bytes = server
+            .handle_request(&release_frame)
+            .expect("failed to handle release");
+        let rlre = parse_rlre(&response_bytes);
+        assert_eq!(rlre.reason, Some(0));
+        assert!(server.active_associations.is_empty());
+    }
+
+    #[test]
+    fn release_request_clears_pending_lls_challenge() {
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: Some(b"LLS".to_vec()),
+            calling_authentication_value: None,
+            user_information: default_initiate_request()
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&build_hdlc_request(0x0001, aarq))
+            .expect("failed to handle aarq");
+        let aare = parse_aare(&response_bytes);
+        assert!(aare.responding_authentication_value.is_some());
+        assert!(server.lls_challenges.contains_key(&0x0001));
+
+        let release_req = ArlrqApdu {
+            reason: None,
+            user_information: None,
+        };
+
+        let frame = HdlcFrame {
+            address: 0x0001,
+            control: 0,
+            information: release_req
+                .to_bytes()
+                .expect("failed to encode release request"),
+        };
+
+        let release_frame = frame.to_bytes().expect("failed to encode frame");
+        let response_bytes = server
+            .handle_request(&release_frame)
+            .expect("failed to handle release");
+        let rlre = parse_rlre(&response_bytes);
+        assert_eq!(rlre.reason, Some(0));
+        assert!(!server.lls_challenges.contains_key(&0x0001));
     }
 }

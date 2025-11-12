@@ -1,4 +1,4 @@
-use crate::acse::{AareApdu, AarqApdu};
+use crate::acse::{AareApdu, AarqApdu, ArlreApdu, ArlrqApdu};
 use crate::error::DlmsError;
 use crate::hdlc::HdlcFrame;
 use crate::security::{hls_decrypt, hls_encrypt, lls_authenticate, SecurityError};
@@ -17,6 +17,7 @@ pub enum ClientError<E> {
     SecurityError(SecurityError),
     AssociationRejected { result: u8, diagnostic: u8 },
     NegotiationFailed(&'static str),
+    ReleaseRejected(u8),
 }
 
 impl<E> From<DlmsError> for ClientError<E> {
@@ -218,6 +219,35 @@ impl<T: Transport> Client<T> {
         let response = ActionResponse::from_bytes(&response_frame.information)?;
 
         Ok(response)
+    }
+
+    pub fn release(&mut self) -> Result<(), ClientError<T::Error>> {
+        let release_req = ArlrqApdu {
+            reason: Some(0),
+            user_information: None,
+        };
+
+        let hdlc_frame = HdlcFrame {
+            address: self.address,
+            control: 0,
+            information: release_req.to_bytes()?,
+        };
+
+        let hdlc_bytes = hdlc_frame.to_bytes()?;
+        let response_bytes = self.send_and_receive(&hdlc_bytes)?;
+        let response_frame = HdlcFrame::from_bytes(&response_bytes)?;
+        let rlre = ArlreApdu::from_bytes(&response_frame.information)
+            .map_err(|_| ClientError::AcseError)?
+            .1;
+
+        if let Some(reason) = rlre.reason {
+            if reason != 0 {
+                return Err(ClientError::ReleaseRejected(reason));
+            }
+        }
+
+        self.negotiated_parameters = None;
+        Ok(())
     }
 
     fn send_and_receive(&mut self, data: &[u8]) -> Result<Vec<u8>, ClientError<T::Error>> {
