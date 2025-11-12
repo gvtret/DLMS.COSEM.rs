@@ -1,15 +1,4 @@
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
-#[cfg(feature = "std")]
 use std::vec::Vec;
-
-use heapless::String;
-
-const MAX_STRING_SIZE: usize = 256;
-const MAX_VEC_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Data {
@@ -17,12 +6,12 @@ pub enum Data {
     Array(Vec<Data>),
     Structure(Vec<Data>),
     Boolean(bool),
-    BitString(heapless::Vec<u8, MAX_VEC_SIZE>),
+    BitString(Vec<u8>),
     DoubleLong(i32),
     DoubleLongUnsigned(u32),
-    OctetString(heapless::Vec<u8, MAX_VEC_SIZE>),
-    VisibleString(String<MAX_STRING_SIZE>),
-    Utf8String(String<MAX_STRING_SIZE>),
+    OctetString(Vec<u8>),
+    VisibleString(String),
+    Utf8String(String),
     Bcd(i8),
     Integer(i8),
     Long(i16),
@@ -33,9 +22,9 @@ pub enum Data {
     Enum(u8),
     Float32(f32),
     Float64(f64),
-    DateTime(heapless::Vec<u8, 12>),
-    Date(heapless::Vec<u8, 5>),
-    Time(heapless::Vec<u8, 4>),
+    DateTime(Vec<u8>),
+    Date(Vec<u8>),
+    Time(Vec<u8>),
     DontCare,
 }
 

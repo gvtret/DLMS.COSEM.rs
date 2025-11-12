@@ -1,39 +1,34 @@
 use crate::error::DlmsError;
 use crate::types::Data;
-use heapless::Vec;
+use std::vec::Vec;
 
-pub fn encode_data(data: &Data, buffer: &mut Vec<u8, 2048>) -> Result<(), DlmsError> {
+pub fn encode_data(data: &Data, buffer: &mut Vec<u8>) -> Result<(), DlmsError> {
     match data {
-        Data::NullData => buffer.push(0).map_err(|_| DlmsError::VecIsFull),
+        Data::NullData => buffer.push(0),
         Data::Boolean(val) => {
-            buffer.push(3).map_err(|_| DlmsError::VecIsFull)?;
-            buffer.push(*val as u8).map_err(|_| DlmsError::VecIsFull)
+            buffer.push(3);
+            buffer.push(*val as u8);
         }
         Data::Integer(val) => {
-            buffer.push(15).map_err(|_| DlmsError::VecIsFull)?;
-            buffer.push(*val as u8).map_err(|_| DlmsError::VecIsFull)
+            buffer.push(15);
+            buffer.push(*val as u8);
         }
         Data::Unsigned(val) => {
-            buffer.push(17).map_err(|_| DlmsError::VecIsFull)?;
-            buffer.push(*val).map_err(|_| DlmsError::VecIsFull)
+            buffer.push(17);
+            buffer.push(*val);
         }
         Data::LongUnsigned(val) => {
-            buffer.push(18).map_err(|_| DlmsError::VecIsFull)?;
-            buffer
-                .extend_from_slice(&val.to_be_bytes())
-                .map_err(|_| DlmsError::VecIsFull)
+            buffer.push(18);
+            buffer.extend_from_slice(&val.to_be_bytes());
         }
         Data::OctetString(val) => {
-            buffer.push(9).map_err(|_| DlmsError::VecIsFull)?;
-            buffer
-                .push(val.len() as u8)
-                .map_err(|_| DlmsError::VecIsFull)?;
-            buffer
-                .extend_from_slice(val)
-                .map_err(|_| DlmsError::VecIsFull)
+            buffer.push(9);
+            buffer.push(val.len() as u8);
+            buffer.extend_from_slice(val);
         }
-        _ => Err(DlmsError::Xdlms), // not all variants are supported yet
+        _ => return Err(DlmsError::Xdlms), // not all variants are supported yet
     }
+    Ok(())
 }
 
 pub fn decode_data(buffer: &[u8]) -> Result<(Data, &[u8]), DlmsError> {
@@ -85,9 +80,7 @@ pub fn decode_data(buffer: &[u8]) -> Result<(Data, &[u8]), DlmsError> {
                 return Err(DlmsError::Xdlms);
             }
             let (val, rest) = rest.split_at(len);
-            let mut vec = Vec::new();
-            vec.extend_from_slice(val).map_err(|_| DlmsError::Xdlms)?;
-            Ok((Data::OctetString(vec), rest))
+            Ok((Data::OctetString(val.to_vec()), rest))
         }
 
         _ => Err(DlmsError::Xdlms), // not all variants are supported yet

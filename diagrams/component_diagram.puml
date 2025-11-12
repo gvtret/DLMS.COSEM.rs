@@ -1,0 +1,25 @@
+@startuml
+!theme vibrant
+
+package "DLMS/COSEM Library" {
+  [Client]
+  [Server]
+  [Transport]
+  [COSEM Objects]
+  [ACSE]
+  [xDLMS]
+  [HDLC]
+}
+
+[Client] --> [Transport] : Uses
+[Server] --> [Transport] : Uses
+[Transport] <|-- [HDLC Transport]
+[Transport] <|-- [Wrapper Transport]
+[Server] o-- [COSEM Objects] : Manages
+[Client] --> [xDLMS] : Sends
+[Server] --> [xDLMS] : Receives
+[xDLMS] --> [ACSE] : Uses
+[ACSE] --> [COSEM Objects] : Accesses
+[xDLMS] --> [HDLC] : Uses
+
+@enduml

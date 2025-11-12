@@ -2,7 +2,7 @@ use crate::axdr::{decode_data, encode_data};
 use crate::cosem::{CosemAttributeDescriptor, CosemMethodDescriptor};
 use crate::error::DlmsError;
 use crate::types::Data;
-use heapless::Vec;
+use std::vec::Vec;
 
 pub type InvokeIdAndPriority = u8;
 
@@ -29,7 +29,7 @@ pub struct GetRequestNext {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GetRequestWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
-    pub attribute_descriptor_list: Vec<CosemAttributeDescriptor, 16>,
+    pub attribute_descriptor_list: Vec<CosemAttributeDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,60 +40,36 @@ pub enum GetRequest {
 }
 
 impl GetRequest {
-    pub fn to_bytes(&self) -> Result<Vec<u8, 2048>, DlmsError> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
         let mut bytes = Vec::new();
         match self {
             GetRequest::Normal(req) => {
-                bytes.push(192).map_err(|_| DlmsError::VecIsFull)?; // get-request-normal
-                bytes
-                    .push(req.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.cosem_attribute_descriptor.class_id.to_be_bytes())
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.cosem_attribute_descriptor.instance_id)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(req.cosem_attribute_descriptor.attribute_id as u8)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(192); // get-request-normal
+                bytes.push(req.invoke_id_and_priority);
+                bytes.extend_from_slice(&req.cosem_attribute_descriptor.class_id.to_be_bytes());
+                bytes.extend_from_slice(&req.cosem_attribute_descriptor.instance_id);
+                bytes.push(req.cosem_attribute_descriptor.attribute_id as u8);
                 if let Some(access_selection) = &req.access_selection {
-                    bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // access-selector
-                    bytes
-                        .push(access_selection.access_selector)
-                        .map_err(|_| DlmsError::VecIsFull)?;
+                    bytes.push(1); // access-selector
+                    bytes.push(access_selection.access_selector);
                     encode_data(&access_selection.access_parameters, &mut bytes)?;
                 } else {
-                    bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // no access-selector
+                    bytes.push(0); // no access-selector
                 }
             }
             GetRequest::Next(req) => {
-                bytes.push(193).map_err(|_| DlmsError::VecIsFull)?; // get-request-next
-                bytes
-                    .push(req.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.block_number.to_be_bytes())
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(193); // get-request-next
+                bytes.push(req.invoke_id_and_priority);
+                bytes.extend_from_slice(&req.block_number.to_be_bytes());
             }
             GetRequest::WithList(req) => {
-                bytes.push(194).map_err(|_| DlmsError::VecIsFull)?; // get-request-with-list
-                bytes
-                    .push(req.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(req.attribute_descriptor_list.len() as u8)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(194); // get-request-with-list
+                bytes.push(req.invoke_id_and_priority);
+                bytes.push(req.attribute_descriptor_list.len() as u8);
                 for desc in &req.attribute_descriptor_list {
-                    bytes
-                        .extend_from_slice(&desc.class_id.to_be_bytes())
-                        .map_err(|_| DlmsError::VecIsFull)?;
-                    bytes
-                        .extend_from_slice(&desc.instance_id)
-                        .map_err(|_| DlmsError::VecIsFull)?;
-                    bytes
-                        .push(desc.attribute_id as u8)
-                        .map_err(|_| DlmsError::VecIsFull)?;
+                    bytes.extend_from_slice(&desc.class_id.to_be_bytes());
+                    bytes.extend_from_slice(&desc.instance_id);
+                    bytes.push(desc.attribute_id as u8);
                 }
             }
         }
@@ -161,8 +137,7 @@ impl GetRequest {
                             class_id: u16::from_be_bytes(class_id_bytes),
                             instance_id: instance_id_bytes,
                             attribute_id: attribute_id[0] as i8,
-                        })
-                        .map_err(|_| DlmsError::VecIsFull)?;
+                        });
                 }
                 Ok(GetRequest::WithList(GetRequestWithList {
                     invoke_id_and_priority: invoke_id_and_priority[0],
@@ -204,14 +179,12 @@ mod tests {
             class_id: 8,
             instance_id: [0, 0, 1, 0, 0, 255],
             attribute_id: 2,
-        })
-        .unwrap();
+        });
         list.push(CosemAttributeDescriptor {
             class_id: 3,
             instance_id: [0, 0, 2, 0, 0, 255],
             attribute_id: 3,
-        })
-        .unwrap();
+        });
 
         let req = GetRequest::WithList(GetRequestWithList {
             invoke_id_and_priority: 1,
@@ -240,11 +213,10 @@ mod tests {
     #[test]
     fn test_get_response_with_list_serialization_deserialization() {
         let mut list = Vec::new();
-        list.push(GetDataResult::Data(Data::NullData)).unwrap();
+        list.push(GetDataResult::Data(Data::NullData));
         list.push(GetDataResult::DataAccessResult(
             DataAccessResult::Success,
-        ))
-        .unwrap();
+        ));
 
         let res = GetResponse::WithList(GetResponseWithList {
             invoke_id_and_priority: 1,
@@ -260,7 +232,7 @@ mod tests {
     #[test]
     fn test_get_response_with_datablock_serialization_deserialization() {
         let mut data = Vec::new();
-        data.extend_from_slice(b"hello world").unwrap();
+        data.extend_from_slice(b"hello world");
         let res = GetResponse::WithDataBlock(GetResponseWithDatablock {
             invoke_id_and_priority: 1,
             result: DataBlockG {
@@ -403,7 +375,7 @@ pub struct GetResponseNormal {
 pub struct DataBlockG {
     pub last_block: bool,
     pub block_number: u32,
-    pub raw_data: Vec<u8, 1024>,
+    pub raw_data: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -415,7 +387,7 @@ pub struct GetResponseWithDatablock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GetResponseWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
-    pub result: Vec<GetDataResult, 16>,
+    pub result: Vec<GetDataResult>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -426,64 +398,46 @@ pub enum GetResponse {
 }
 
 impl GetResponse {
-    pub fn to_bytes(&self) -> Result<Vec<u8, 2048>, DlmsError> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
         let mut bytes = Vec::new();
         match self {
             GetResponse::Normal(res) => {
-                bytes.push(196).map_err(|_| DlmsError::VecIsFull)?; // get-response-normal
-                bytes
-                    .push(res.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(196); // get-response-normal
+                bytes.push(res.invoke_id_and_priority);
                 match &res.result {
                     GetDataResult::Data(data) => {
-                        bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // data
+                        bytes.push(0); // data
                         encode_data(data, &mut bytes)?;
                     }
                     GetDataResult::DataAccessResult(dar) => {
-                        bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // data-access-result
-                        bytes
-                            .push(dar.clone().into())
-                            .map_err(|_| DlmsError::VecIsFull)?;
+                        bytes.push(1); // data-access-result
+                        bytes.push(dar.clone().into());
                     }
                 }
             }
             GetResponse::WithList(res) => {
-                bytes.push(198).map_err(|_| DlmsError::VecIsFull)?; // get-response-with-list
-                bytes
-                    .push(res.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(res.result.len() as u8)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(198); // get-response-with-list
+                bytes.push(res.invoke_id_and_priority);
+                bytes.push(res.result.len() as u8);
                 for item in &res.result {
                     match item {
                         GetDataResult::Data(data) => {
-                            bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // data
+                            bytes.push(0); // data
                             encode_data(data, &mut bytes)?;
                         }
                         GetDataResult::DataAccessResult(dar) => {
-                            bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // data-access-result
-                            bytes
-                                .push(dar.clone().into())
-                                .map_err(|_| DlmsError::VecIsFull)?;
+                            bytes.push(1); // data-access-result
+                            bytes.push(dar.clone().into());
                         }
                     }
                 }
             }
             GetResponse::WithDataBlock(res) => {
-                bytes.push(197).map_err(|_| DlmsError::VecIsFull)?; // get-response-with-datablock
-                bytes
-                    .push(res.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(res.result.last_block as u8)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&res.result.block_number.to_be_bytes())
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&res.result.raw_data)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(197); // get-response-with-datablock
+                bytes.push(res.invoke_id_and_priority);
+                bytes.push(res.result.last_block as u8);
+                bytes.extend_from_slice(&res.result.block_number.to_be_bytes());
+                bytes.extend_from_slice(&res.result.raw_data);
             }
         }
         Ok(bytes)
@@ -560,7 +514,7 @@ impl GetResponse {
                             reason => DataAccessResult::OtherReason(reason),
                         })
                     };
-                    result.push(item).map_err(|_| DlmsError::VecIsFull)?;
+                    result.push(item);
                 }
                 Ok(GetResponse::WithList(GetResponseWithList {
                     invoke_id_and_priority: invoke_id_and_priority[0],
@@ -571,8 +525,7 @@ impl GetResponse {
                 let (invoke_id_and_priority, rest) = rest.split_at(1);
                 let (last_block, rest) = rest.split_at(1);
                 let (block_number, rest) = rest.split_at(4);
-                let mut raw_data = Vec::new();
-                raw_data.extend_from_slice(rest).map_err(|_| DlmsError::VecIsFull)?;
+                let raw_data = rest.to_vec();
 
                 let mut block_number_bytes = [0u8; 4];
                 block_number_bytes.copy_from_slice(block_number);
@@ -603,8 +556,8 @@ pub struct SetRequestNormal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetRequestWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
-    pub attribute_descriptor_list: Vec<CosemAttributeDescriptor, 16>,
-    pub value_list: Vec<Data, 16>,
+    pub attribute_descriptor_list: Vec<CosemAttributeDescriptor>,
+    pub value_list: Vec<Data>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -614,31 +567,21 @@ pub enum SetRequest {
 }
 
 impl SetRequest {
-    pub fn to_bytes(&self) -> Result<Vec<u8, 2048>, DlmsError> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
         let mut bytes = Vec::new();
         match self {
             SetRequest::Normal(req) => {
-                bytes.push(193).map_err(|_| DlmsError::VecIsFull)?; // set-request-normal
-                bytes
-                    .push(req.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.cosem_attribute_descriptor.class_id.to_be_bytes())
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.cosem_attribute_descriptor.instance_id)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(req.cosem_attribute_descriptor.attribute_id as u8)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(193); // set-request-normal
+                bytes.push(req.invoke_id_and_priority);
+                bytes.extend_from_slice(&req.cosem_attribute_descriptor.class_id.to_be_bytes());
+                bytes.extend_from_slice(&req.cosem_attribute_descriptor.instance_id);
+                bytes.push(req.cosem_attribute_descriptor.attribute_id as u8);
                 if let Some(access_selection) = &req.access_selection {
-                    bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // access-selector
-                    bytes
-                        .push(access_selection.access_selector)
-                        .map_err(|_| DlmsError::VecIsFull)?;
+                    bytes.push(1); // access-selector
+                    bytes.push(access_selection.access_selector);
                     encode_data(&access_selection.access_parameters, &mut bytes)?;
                 } else {
-                    bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // no access-selector
+                    bytes.push(0); // no access-selector
                 }
                 encode_data(&req.value, &mut bytes)?;
             }
@@ -701,7 +644,7 @@ impl SetRequest {
 // --- InitiateRequest ---
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitiateRequest {
-    pub dedicated_key: Option<Vec<u8, 64>>,
+    pub dedicated_key: Option<Vec<u8>>,
     pub response_allowed: bool,
     pub proposed_quality_of_service: Option<u8>,
     pub proposed_dlms_version_number: u8,
@@ -735,7 +678,7 @@ pub struct SetResponseNormal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetResponseWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
-    pub result: Vec<DataAccessResult, 16>,
+    pub result: Vec<DataAccessResult>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -745,17 +688,13 @@ pub enum SetResponse {
 }
 
 impl SetResponse {
-    pub fn to_bytes(&self) -> Result<Vec<u8, 2048>, DlmsError> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
         let mut bytes = Vec::new();
         match self {
             SetResponse::Normal(res) => {
-                bytes.push(197).map_err(|_| DlmsError::VecIsFull)?; // set-response-normal
-                bytes
-                    .push(res.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(res.result.clone().into())
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(197); // set-response-normal
+                bytes.push(res.invoke_id_and_priority);
+                bytes.push(res.result.clone().into());
             }
             _ => return Err(DlmsError::Xdlms),
         }
@@ -809,8 +748,8 @@ pub struct ActionRequestNormal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionRequestWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
-    pub cosem_method_descriptor_list: Vec<CosemMethodDescriptor, 16>,
-    pub method_invocation_parameters: Vec<Data, 16>,
+    pub cosem_method_descriptor_list: Vec<CosemMethodDescriptor>,
+    pub method_invocation_parameters: Vec<Data>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -820,28 +759,20 @@ pub enum ActionRequest {
 }
 
 impl ActionRequest {
-    pub fn to_bytes(&self) -> Result<Vec<u8, 2048>, DlmsError> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
         let mut bytes = Vec::new();
         match self {
             ActionRequest::Normal(req) => {
-                bytes.push(195).map_err(|_| DlmsError::VecIsFull)?; // action-request-normal
-                bytes
-                    .push(req.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.cosem_method_descriptor.class_id.to_be_bytes())
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .extend_from_slice(&req.cosem_method_descriptor.instance_id)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(req.cosem_method_descriptor.method_id as u8)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(195); // action-request-normal
+                bytes.push(req.invoke_id_and_priority);
+                bytes.extend_from_slice(&req.cosem_method_descriptor.class_id.to_be_bytes());
+                bytes.extend_from_slice(&req.cosem_method_descriptor.instance_id);
+                bytes.push(req.cosem_method_descriptor.method_id as u8);
                 if let Some(mip) = &req.method_invocation_parameters {
-                    bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // method-invocation-parameters
+                    bytes.push(1); // method-invocation-parameters
                     encode_data(mip, &mut bytes)?;
                 } else {
-                    bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // no method-invocation-parameters
+                    bytes.push(0); // no method-invocation-parameters
                 }
             }
             _ => return Err(DlmsError::Xdlms),
@@ -943,7 +874,7 @@ pub struct ActionResponseNormal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionResponseWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
-    pub list_of_responses: Vec<ActionResponseWithOptionalData, 16>,
+    pub list_of_responses: Vec<ActionResponseWithOptionalData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -953,31 +884,25 @@ pub enum ActionResponse {
 }
 
 impl ActionResponse {
-    pub fn to_bytes(&self) -> Result<Vec<u8, 2048>, DlmsError> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
         let mut bytes = Vec::new();
         match self {
             ActionResponse::Normal(res) => {
-                bytes.push(198).map_err(|_| DlmsError::VecIsFull)?; // action-response-normal
-                bytes
-                    .push(res.invoke_id_and_priority)
-                    .map_err(|_| DlmsError::VecIsFull)?;
-                bytes
-                    .push(res.single_response.result.clone().into())
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                bytes.push(198); // action-response-normal
+                bytes.push(res.invoke_id_and_priority);
+                bytes.push(res.single_response.result.clone().into());
                 if let Some(rp) = &res.single_response.return_parameters {
-                    bytes.push(1).map_err(|_| DlmsError::VecIsFull)?; // return-parameters
+                    bytes.push(1); // return-parameters
                     match rp {
                         GetDataResult::Data(data) => {
                             encode_data(data, &mut bytes)?;
                         }
                         GetDataResult::DataAccessResult(dar) => {
-                            bytes
-                                .push(dar.clone().into())
-                                .map_err(|_| DlmsError::VecIsFull)?;
+                            bytes.push(dar.clone().into());
                         }
                     }
                 } else {
-                    bytes.push(0).map_err(|_| DlmsError::VecIsFull)?; // no return-parameters
+                    bytes.push(0); // no return-parameters
                 }
             }
             _ => return Err(DlmsError::Xdlms),

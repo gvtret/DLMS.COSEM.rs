@@ -1,7 +1,6 @@
 use crate::error::DlmsError;
-use crate::MAX_PDU_SIZE;
 use crc::Crc;
-use heapless::Vec;
+use std::vec::Vec;
 
 pub const HDLC_FLAG: u8 = 0x7E;
 pub const CRC_CCITT_FALSE: crc::Algorithm<u16> = crc::Algorithm {
@@ -20,7 +19,7 @@ pub const CRC_ALGORITHM: Crc<u16> = Crc::<u16>::new(&CRC_CCITT_FALSE);
 pub struct HdlcFrame {
     pub address: u16,
     pub control: u8,
-    pub information: Vec<u8, MAX_PDU_SIZE>,
+    pub information: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,47 +38,33 @@ impl From<HdlcFrameError> for DlmsError {
 }
 
 impl HdlcFrame {
-    pub fn to_bytes(&self) -> Result<Vec<u8, MAX_PDU_SIZE>, DlmsError> {
-        let mut frame = Vec::<u8, MAX_PDU_SIZE>::new();
-        frame.push(HDLC_FLAG).map_err(|_| DlmsError::VecIsFull)?;
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
+        let mut frame = Vec::new();
+        frame.push(HDLC_FLAG);
 
-        let mut data_to_checksum = Vec::<u8, MAX_PDU_SIZE>::new();
-        data_to_checksum
-            .extend_from_slice(&self.address.to_be_bytes())
-            .map_err(|_| DlmsError::VecIsFull)?;
-        data_to_checksum
-            .push(self.control)
-            .map_err(|_| DlmsError::VecIsFull)?;
-        data_to_checksum
-            .extend_from_slice(&self.information)
-            .map_err(|_| DlmsError::VecIsFull)?;
+        let mut data_to_checksum = Vec::new();
+        data_to_checksum.extend_from_slice(&self.address.to_be_bytes());
+        data_to_checksum.push(self.control);
+        data_to_checksum.extend_from_slice(&self.information);
 
         let checksum = CRC_ALGORITHM.checksum(&data_to_checksum);
 
-        let mut frame_body = Vec::<u8, MAX_PDU_SIZE>::new();
-        frame_body
-            .extend_from_slice(&self.address.to_be_bytes())
-            .map_err(|_| DlmsError::VecIsFull)?;
-        frame_body
-            .push(self.control)
-            .map_err(|_| DlmsError::VecIsFull)?;
-        frame_body
-            .extend_from_slice(&self.information)
-            .map_err(|_| DlmsError::VecIsFull)?;
-        frame_body
-            .extend_from_slice(&checksum.to_le_bytes())
-            .map_err(|_| DlmsError::VecIsFull)?;
+        let mut frame_body = Vec::new();
+        frame_body.extend_from_slice(&self.address.to_be_bytes());
+        frame_body.push(self.control);
+        frame_body.extend_from_slice(&self.information);
+        frame_body.extend_from_slice(&checksum.to_le_bytes());
 
         for byte in frame_body {
             if byte == HDLC_FLAG || byte == 0x7D {
-                frame.push(0x7D).map_err(|_| DlmsError::VecIsFull)?;
-                frame.push(byte ^ 0x20).map_err(|_| DlmsError::VecIsFull)?;
+                frame.push(0x7D);
+                frame.push(byte ^ 0x20);
             } else {
-                frame.push(byte).map_err(|_| DlmsError::VecIsFull)?;
+                frame.push(byte);
             }
         }
 
-        frame.push(HDLC_FLAG).map_err(|_| DlmsError::VecIsFull)?;
+        frame.push(HDLC_FLAG);
 
         Ok(frame)
     }
@@ -89,16 +74,14 @@ impl HdlcFrame {
             return Err(HdlcFrameError::InvalidFrame.into());
         }
 
-        let mut frame_body = Vec::<u8, MAX_PDU_SIZE>::new();
+        let mut frame_body = Vec::new();
         let mut i = 1;
         while i < bytes.len() - 1 {
             if bytes[i] == 0x7D {
                 i += 1;
-                frame_body
-                    .push(bytes[i] ^ 0x20)
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                frame_body.push(bytes[i] ^ 0x20);
             } else {
-                frame_body.push(bytes[i]).map_err(|_| DlmsError::VecIsFull)?;
+                frame_body.push(bytes[i]);
             }
             i += 1;
         }
@@ -119,8 +102,7 @@ impl HdlcFrame {
 
         let address = u16::from_be_bytes([data_to_checksum[0], data_to_checksum[1]]);
         let control = data_to_checksum[2];
-        let information = Vec::<u8, MAX_PDU_SIZE>::from_slice(&data_to_checksum[3..])
-            .map_err(|_| DlmsError::VecIsFull)?;
+        let information = data_to_checksum[3..].to_vec();
 
         Ok(HdlcFrame {
             address,
@@ -137,8 +119,7 @@ mod tests {
 
     #[test]
     fn test_hdlc_frame_serialization_deserialization() {
-        let mut info = Vec::<u8, MAX_PDU_SIZE>::new();
-        info.extend_from_slice(b"hello world").unwrap();
+        let info = b"hello world".to_vec();
         let frame = HdlcFrame {
             address: 0x1234,
             control: 0xAB,

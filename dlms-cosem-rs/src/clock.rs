@@ -118,9 +118,7 @@ mod tests {
     #[test]
     fn test_clock_set_get() {
         let mut clock = Clock::new();
-        let mut time = heapless::Vec::<u8, 12>::new();
-        time.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-            .unwrap();
+        let time = vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         clock
             .set_attribute(2, CosemData::DateTime(time.clone()))
             .unwrap();

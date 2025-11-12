@@ -12,6 +12,7 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::thread;
 use std::boxed::Box;
+use std::vec::Vec;
 
 struct MockStream {
     tx: mpsc::Sender<u8>,
@@ -213,13 +214,13 @@ fn yellow_book_conformance_test_action_request() {
     let mut server = Server::new(1, server_transport, None, None);
 
     let instance_id = [0, 0, 15, 0, 0, 255];
-    let association_ln = dlms_cosem::association_ln::AssociationLN {
-        object_list: heapless::Vec::new(),
-        associated_partners_id: 0,
-        application_context_name: heapless::Vec::new(),
-        xdlms_context_info: heapless::Vec::new(),
-        authentication_mechanism_name: heapless::Vec::new(),
-    };
+    let association_ln = dlms_cosem::association_ln::AssociationLN::new(
+        Vec::new(),
+        0,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     server.register_object(instance_id, Box::new(association_ln));
 
     let _server_thread = thread::spawn(move || {
@@ -228,8 +229,8 @@ fn yellow_book_conformance_test_action_request() {
 
     client.associate().expect("Association failed");
 
-    let mut challenge = heapless::Vec::new();
-    challenge.extend_from_slice(b"client_challenge").unwrap();
+    let mut challenge = Vec::new();
+    challenge.extend_from_slice(b"client_challenge");
     let req = ActionRequest::Normal(ActionRequestNormal {
         invoke_id_and_priority: 1,
         cosem_method_descriptor: CosemMethodDescriptor {

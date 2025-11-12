@@ -9,9 +9,9 @@ use crate::xdlms::{
     ActionRequest, ActionResponse, ActionResponseNormal, ActionResult, GetRequest, GetResponse,
     GetResponseNormal, GetDataResult, SetRequest, SetResponse, SetResponseNormal, DataAccessResult,
 };
-use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
-use heapless::Vec;
+use std::boxed::Box;
+use std::collections::BTreeMap;
+use std::vec::Vec;
 
 #[derive(Debug)]
 pub enum ServerError<E> {
@@ -37,8 +37,8 @@ impl<E> From<DlmsError> for ServerError<E> {
 pub struct Server<T: Transport> {
     address: u16,
     transport: T,
-    password: Option<Vec<u8, 32>>,
-    key: Option<Vec<u8, 16>>,
+    password: Option<Vec<u8>>,
+    key: Option<Vec<u8>>,
     objects: BTreeMap<[u8; 6], Box<dyn CosemObject>>,
 }
 
@@ -46,8 +46,8 @@ impl<T: Transport> Server<T> {
     pub fn new(
         address: u16,
         transport: T,
-        password: Option<Vec<u8, 32>>,
-        key: Option<Vec<u8, 16>>,
+        password: Option<Vec<u8>>,
+        key: Option<Vec<u8>>,
     ) -> Self {
         Server {
             address,
@@ -85,7 +85,7 @@ impl<T: Transport> Server<T> {
     fn handle_request(
         &mut self,
         request_bytes: &[u8],
-    ) -> Result<Vec<u8, 2048>, ServerError<T::Error>> {
+    ) -> Result<Vec<u8>, ServerError<T::Error>> {
         let request_frame = HdlcFrame::from_bytes(request_bytes)?;
 
         let response_bytes =
@@ -118,15 +118,13 @@ impl<T: Transport> Server<T> {
                                 Err(_) => aare.result = 1, // failure
                             }
                         } else {
-                            let challenge: Vec<u8, 32> =
-                                Vec::from_slice(b"challenge").map_err(|_| DlmsError::VecIsFull)?;
+                            let challenge = b"challenge".to_vec();
                             aare.responding_authentication_value = Some(challenge);
                         }
                     }
                 }
                 aare.user_information
-                    .extend_from_slice(b"user_info")
-                    .map_err(|_| DlmsError::VecIsFull)?;
+                    .extend_from_slice(b"user_info");
                 aare.to_bytes()?
             } else if let Ok(get_req) = GetRequest::from_bytes(&request_frame.information) {
                 let GetRequest::Normal(get_req) = get_req else {

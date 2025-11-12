@@ -1,0 +1,23 @@
+@startuml
+!theme vibrant
+
+class AssociationLN {
+  - object_list: Vec<u8>
+  - associated_partners_id: u32
+  - application_context_name: Vec<u8>
+  - xdlms_context_info: Vec<u8>
+  - authentication_mechanism_name: Vec<u8>
+  + new()
+  + reply_to_hls_authentication()
+}
+
+interface CosemObject {
+  + class_id()
+  + get_attribute()
+  + set_attribute()
+  + invoke_method()
+}
+
+AssociationLN ..|> CosemObject
+
+@enduml
