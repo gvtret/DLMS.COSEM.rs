@@ -95,10 +95,6 @@ impl<T: Transport> Server<T> {
         self.association_parameters = params;
     }
 
-    pub fn set_association_parameters(&mut self, params: AssociationParameters) {
-        self.association_parameters = params;
-    }
-
     pub fn register_object(&mut self, instance_id: [u8; 6], object: Box<dyn CosemObject>) {
         self.register_object_internal(instance_id, object);
     }
@@ -117,8 +113,10 @@ impl<T: Transport> Server<T> {
         for (logical_name, object) in &self.objects {
             list.push(ObjectListEntry {
                 class_id: object.class_id(),
-                version: 0,
+                version: object.version(),
                 logical_name: *logical_name,
+                attribute_access: object.attribute_access_rights(),
+                method_access: object.method_access_rights(),
             });
         }
     }
@@ -516,6 +514,7 @@ mod tests {
             assert_eq!(list.len(), 1);
             assert_eq!(list[0].logical_name, DEFAULT_ASSOCIATION_LN);
             assert_eq!(list[0].class_id, 15);
+            assert!(!list[0].attribute_access.is_empty());
         }
 
         let logical_name = [0, 0, 1, 0, 0, 255];
@@ -526,9 +525,14 @@ mod tests {
             .lock()
             .expect("association list poisoned");
         assert_eq!(list.len(), 2);
-        assert!(list
+        let register_entry = list
             .iter()
-            .any(|entry| entry.logical_name == logical_name && entry.class_id == 3));
+            .find(|entry| entry.logical_name == logical_name)
+            .expect("register not present in association list");
+        assert_eq!(register_entry.class_id, 3);
+        assert_eq!(register_entry.version, 0);
+        assert_eq!(register_entry.attribute_access.len(), 2);
+        assert_eq!(register_entry.method_access.len(), 1);
     }
 
     #[test]

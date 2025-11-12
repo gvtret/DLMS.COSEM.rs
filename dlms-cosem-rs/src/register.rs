@@ -1,5 +1,8 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, MethodAccessDescriptor,
+    MethodAccessMode,
+};
 use crate::types::CosemData;
 
 #[derive(Debug)]
@@ -26,6 +29,17 @@ impl Default for Register {
 impl CosemObject for Register {
     fn class_id(&self) -> u16 {
         3
+    }
+
+    fn attribute_access_rights(&self) -> Vec<AttributeAccessDescriptor> {
+        vec![
+            AttributeAccessDescriptor::new(2, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(3, AttributeAccessMode::ReadWrite),
+        ]
+    }
+
+    fn method_access_rights(&self) -> Vec<MethodAccessDescriptor> {
+        vec![MethodAccessDescriptor::new(1, MethodAccessMode::Access)]
     }
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {

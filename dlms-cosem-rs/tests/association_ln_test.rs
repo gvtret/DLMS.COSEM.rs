@@ -1,5 +1,8 @@
 use dlms_cosem::association_ln::{AssociationLN, ObjectListEntry};
-use dlms_cosem::cosem_object::CosemObject;
+use dlms_cosem::cosem_object::{
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, MethodAccessDescriptor,
+    MethodAccessMode,
+};
 use dlms_cosem::types::CosemData;
 use std::sync::{Arc, Mutex};
 
@@ -9,6 +12,11 @@ fn test_association_ln_new() {
         class_id: 3,
         version: 0,
         logical_name: [0, 0, 1, 0, 0, 255],
+        attribute_access: vec![
+            AttributeAccessDescriptor::new(2, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(3, AttributeAccessMode::ReadWrite),
+        ],
+        method_access: vec![MethodAccessDescriptor::new(1, MethodAccessMode::Access)],
     }]));
     let app_context_name = b"app_context".to_vec();
     let xdlms_context_info = b"xdlms_info".to_vec();
@@ -30,9 +38,23 @@ fn test_association_ln_new() {
             CosemData::Unsigned(0),
             CosemData::OctetString(vec![0, 0, 1, 0, 0, 255]),
             CosemData::Structure(vec![
+                CosemData::Array(vec![
+                    CosemData::Structure(vec![
+                        CosemData::Integer(2),
+                        CosemData::Enum(AttributeAccessMode::ReadWrite as u8),
+                        CosemData::NullData,
+                    ]),
+                    CosemData::Structure(vec![
+                        CosemData::Integer(3),
+                        CosemData::Enum(AttributeAccessMode::ReadWrite as u8),
+                        CosemData::NullData,
+                    ]),
+                ]),
                 CosemData::Array(Vec::new()),
-                CosemData::Array(Vec::new()),
-                CosemData::Array(Vec::new()),
+                CosemData::Array(vec![CosemData::Structure(vec![
+                    CosemData::Integer(1),
+                    CosemData::Enum(MethodAccessMode::Access as u8),
+                ]),]),
             ]),
         ])]))
     );

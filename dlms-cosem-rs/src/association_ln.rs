@@ -1,26 +1,57 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, MethodAccessDescriptor,
+    MethodAccessMode,
+};
 use crate::types::CosemData;
 use std::sync::{Arc, Mutex};
 use std::vec::Vec;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectListEntry {
     pub class_id: u16,
     pub version: u8,
     pub logical_name: [u8; 6],
+    pub attribute_access: Vec<AttributeAccessDescriptor>,
+    pub method_access: Vec<MethodAccessDescriptor>,
 }
 
 impl ObjectListEntry {
     fn to_cosem_data(&self) -> CosemData {
+        let attribute_access = self
+            .attribute_access
+            .iter()
+            .map(|descriptor| {
+                CosemData::Structure(vec![
+                    CosemData::Integer(descriptor.attribute_id),
+                    CosemData::Enum(descriptor.access_mode as u8),
+                    descriptor
+                        .selective_access_descriptor
+                        .clone()
+                        .unwrap_or(CosemData::NullData),
+                ])
+            })
+            .collect();
+
+        let method_access = self
+            .method_access
+            .iter()
+            .map(|descriptor| {
+                CosemData::Structure(vec![
+                    CosemData::Integer(descriptor.method_id),
+                    CosemData::Enum(descriptor.access_mode as u8),
+                ])
+            })
+            .collect();
+
         CosemData::Structure(vec![
             CosemData::LongUnsigned(self.class_id),
             CosemData::Unsigned(self.version),
             CosemData::OctetString(self.logical_name.to_vec()),
             CosemData::Structure(vec![
+                CosemData::Array(attribute_access),
                 CosemData::Array(Vec::new()),
-                CosemData::Array(Vec::new()),
-                CosemData::Array(Vec::new()),
+                CosemData::Array(method_access),
             ]),
         ])
     }
@@ -90,6 +121,20 @@ impl Default for AssociationLN {
 impl CosemObject for AssociationLN {
     fn class_id(&self) -> u16 {
         15
+    }
+
+    fn attribute_access_rights(&self) -> Vec<AttributeAccessDescriptor> {
+        vec![
+            AttributeAccessDescriptor::new(2, AttributeAccessMode::Read),
+            AttributeAccessDescriptor::new(3, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(4, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(5, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(6, AttributeAccessMode::ReadWrite),
+        ]
+    }
+
+    fn method_access_rights(&self) -> Vec<MethodAccessDescriptor> {
+        vec![MethodAccessDescriptor::new(1, MethodAccessMode::Access)]
     }
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {
@@ -178,6 +223,11 @@ mod tests {
             class_id: 3,
             version: 1,
             logical_name: [0, 0, 1, 0, 0, 255],
+            attribute_access: vec![
+                AttributeAccessDescriptor::new(2, AttributeAccessMode::ReadWrite),
+                AttributeAccessDescriptor::new(3, AttributeAccessMode::Read),
+            ],
+            method_access: vec![MethodAccessDescriptor::new(1, MethodAccessMode::Access)],
         };
 
         let data = entry.to_cosem_data();
@@ -188,9 +238,23 @@ mod tests {
                 CosemData::Unsigned(1),
                 CosemData::OctetString(vec![0, 0, 1, 0, 0, 255]),
                 CosemData::Structure(vec![
+                    CosemData::Array(vec![
+                        CosemData::Structure(vec![
+                            CosemData::Integer(2),
+                            CosemData::Enum(AttributeAccessMode::ReadWrite as u8),
+                            CosemData::NullData,
+                        ]),
+                        CosemData::Structure(vec![
+                            CosemData::Integer(3),
+                            CosemData::Enum(AttributeAccessMode::Read as u8),
+                            CosemData::NullData,
+                        ]),
+                    ]),
                     CosemData::Array(Vec::new()),
-                    CosemData::Array(Vec::new()),
-                    CosemData::Array(Vec::new()),
+                    CosemData::Array(vec![CosemData::Structure(vec![
+                        CosemData::Integer(1),
+                        CosemData::Enum(MethodAccessMode::Access as u8),
+                    ]),]),
                 ]),
             ])
         );
@@ -202,6 +266,8 @@ mod tests {
             class_id: 15,
             version: 0,
             logical_name: [0, 0, 40, 0, 0, 255],
+            attribute_access: Vec::new(),
+            method_access: Vec::new(),
         }]));
 
         let association =
@@ -217,6 +283,8 @@ mod tests {
                 class_id: 15,
                 version: 0,
                 logical_name: [0, 0, 40, 0, 0, 255],
+                attribute_access: Vec::new(),
+                method_access: Vec::new(),
             }
             .to_cosem_data()])
         );
@@ -225,6 +293,8 @@ mod tests {
             class_id: 3,
             version: 0,
             logical_name: [1, 0, 0, 0, 0, 255],
+            attribute_access: Vec::new(),
+            method_access: Vec::new(),
         });
 
         let updated = association
@@ -238,12 +308,16 @@ mod tests {
                     class_id: 15,
                     version: 0,
                     logical_name: [0, 0, 40, 0, 0, 255],
+                    attribute_access: Vec::new(),
+                    method_access: Vec::new(),
                 }
                 .to_cosem_data(),
                 ObjectListEntry {
                     class_id: 3,
                     version: 0,
                     logical_name: [1, 0, 0, 0, 0, 255],
+                    attribute_access: Vec::new(),
+                    method_access: Vec::new(),
                 }
                 .to_cosem_data(),
             ])
