@@ -1,5 +1,5 @@
-use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
+use crate::cosem_object::CosemObject;
 use crate::types::CosemData;
 use std::vec::Vec;
 
@@ -15,7 +15,9 @@ impl CosemObject for SapAssignment {
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {
         match attribute_id {
-            2 => Some(CosemData::OctetString(self.logical_device_name_list.clone())),
+            2 => Some(CosemData::OctetString(
+                self.logical_device_name_list.clone(),
+            )),
             _ => None,
         }
     }

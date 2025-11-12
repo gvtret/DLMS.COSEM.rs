@@ -4,7 +4,121 @@ use crate::error::DlmsError;
 use crate::types::CosemData;
 use std::vec::Vec;
 
+fn encode_object_count(len: usize, buffer: &mut Vec<u8>) {
+    if len < 0x80 {
+        buffer.push(len as u8);
+        return;
+    }
+
+    let mut bytes = Vec::new();
+    let mut value = len;
+    while value > 0 {
+        bytes.push((value & 0xFF) as u8);
+        value >>= 8;
+    }
+    bytes.reverse();
+
+    buffer.push(0x80 | (bytes.len() as u8));
+    buffer.extend_from_slice(&bytes);
+}
+
+fn decode_object_count(bytes: &[u8]) -> Result<(usize, usize), DlmsError> {
+    if bytes.is_empty() {
+        return Err(DlmsError::Xdlms);
+    }
+
+    let first = bytes[0];
+    if first < 0x80 {
+        return Ok((first as usize, 1));
+    }
+
+    let count_len = (first & 0x7F) as usize;
+    if bytes.len() < 1 + count_len {
+        return Err(DlmsError::Xdlms);
+    }
+
+    let mut value = 0usize;
+    for &byte in &bytes[1..=count_len] {
+        value = (value << 8) | byte as usize;
+    }
+
+    Ok((value, 1 + count_len))
+}
+
+fn decode_octet_string(bytes: &[u8]) -> Result<(&[u8], usize), DlmsError> {
+    if bytes.is_empty() || bytes[0] != 0x04 {
+        return Err(DlmsError::Xdlms);
+    }
+
+    let (len, consumed) = decode_object_count(&bytes[1..])?;
+    let start = 1 + consumed;
+    let end = start + len;
+    if bytes.len() < end {
+        return Err(DlmsError::Xdlms);
+    }
+
+    Ok((&bytes[start..end], end))
+}
+
 pub type InvokeIdAndPriority = u8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conformance {
+    pub value: u32,
+}
+
+impl Conformance {
+    pub fn to_bytes(&self) -> [u8; 3] {
+        [
+            ((self.value >> 16) & 0xFF) as u8,
+            ((self.value >> 8) & 0xFF) as u8,
+            (self.value & 0xFF) as u8,
+        ]
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DlmsError> {
+        if bytes.len() < 3 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        Ok(Conformance {
+            value: ((bytes[0] as u32) << 16) | ((bytes[1] as u32) << 8) | bytes[2] as u32,
+        })
+    }
+
+    pub fn intersection(&self, other: &Conformance) -> Conformance {
+        Conformance {
+            value: self.value & other.value,
+        }
+    }
+
+    pub fn contains(&self, other: &Conformance) -> bool {
+        self.value & other.value == other.value
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.value == 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssociationParameters {
+    pub dlms_version: u8,
+    pub conformance: Conformance,
+    pub max_receive_pdu_size: u16,
+    pub quality_of_service: Option<u8>,
+}
+
+impl Default for AssociationParameters {
+    fn default() -> Self {
+        AssociationParameters {
+            dlms_version: 6,
+            conformance: Conformance { value: 0x0010_0000 },
+            max_receive_pdu_size: 0x0400,
+            quality_of_service: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectiveAccessDescriptor {
@@ -132,12 +246,11 @@ impl GetRequest {
                     let mut instance_id_bytes = [0u8; 6];
                     instance_id_bytes.copy_from_slice(instance_id);
 
-                    attribute_descriptor_list
-                        .push(CosemAttributeDescriptor {
-                            class_id: u16::from_be_bytes(class_id_bytes),
-                            instance_id: instance_id_bytes,
-                            attribute_id: attribute_id[0] as i8,
-                        });
+                    attribute_descriptor_list.push(CosemAttributeDescriptor {
+                        class_id: u16::from_be_bytes(class_id_bytes),
+                        instance_id: instance_id_bytes,
+                        attribute_id: attribute_id[0] as i8,
+                    });
                 }
                 Ok(GetRequest::WithList(GetRequestWithList {
                     invoke_id_and_priority: invoke_id_and_priority[0],
@@ -174,17 +287,18 @@ mod tests {
 
     #[test]
     fn test_get_request_with_list_serialization_deserialization() {
-        let mut list = Vec::new();
-        list.push(CosemAttributeDescriptor {
-            class_id: 8,
-            instance_id: [0, 0, 1, 0, 0, 255],
-            attribute_id: 2,
-        });
-        list.push(CosemAttributeDescriptor {
-            class_id: 3,
-            instance_id: [0, 0, 2, 0, 0, 255],
-            attribute_id: 3,
-        });
+        let list = vec![
+            CosemAttributeDescriptor {
+                class_id: 8,
+                instance_id: [0, 0, 1, 0, 0, 255],
+                attribute_id: 2,
+            },
+            CosemAttributeDescriptor {
+                class_id: 3,
+                instance_id: [0, 0, 2, 0, 0, 255],
+                attribute_id: 3,
+            },
+        ];
 
         let req = GetRequest::WithList(GetRequestWithList {
             invoke_id_and_priority: 1,
@@ -212,11 +326,10 @@ mod tests {
 
     #[test]
     fn test_get_response_with_list_serialization_deserialization() {
-        let mut list = Vec::new();
-        list.push(GetDataResult::Data(CosemData::NullData));
-        list.push(GetDataResult::DataAccessResult(
-            DataAccessResult::Success,
-        ));
+        let list = vec![
+            GetDataResult::Data(CosemData::NullData),
+            GetDataResult::DataAccessResult(DataAccessResult::Success),
+        ];
 
         let res = GetResponse::WithList(GetResponseWithList {
             invoke_id_and_priority: 1,
@@ -312,6 +425,45 @@ mod tests {
         let res2 = ActionResponse::from_bytes(&bytes).unwrap();
 
         assert_eq!(res, res2);
+    }
+
+    #[test]
+    fn test_initiate_request_round_trip() {
+        let req = InitiateRequest {
+            dedicated_key: Some(vec![0x01, 0x02, 0x03, 0x04]),
+            response_allowed: false,
+            proposed_quality_of_service: Some(0x05),
+            proposed_dlms_version_number: 6,
+            proposed_conformance: Conformance { value: 0x0001_0203 },
+            client_max_receive_pdu_size: 0x0400,
+        };
+
+        let bytes = req.to_bytes().unwrap();
+        let decoded = InitiateRequest::from_bytes(&bytes).unwrap();
+        assert_eq!(req, decoded);
+
+        let user_information = req.to_user_information().unwrap();
+        let decoded_from_ui = InitiateRequest::from_user_information(&user_information).unwrap();
+        assert_eq!(req, decoded_from_ui);
+    }
+
+    #[test]
+    fn test_initiate_response_round_trip() {
+        let res = InitiateResponse {
+            negotiated_quality_of_service: Some(0x01),
+            negotiated_dlms_version_number: 6,
+            negotiated_conformance: Conformance { value: 0x0010_0000 },
+            server_max_receive_pdu_size: 0x0800,
+            vaa_name: 0x0007,
+        };
+
+        let bytes = res.to_bytes().unwrap();
+        let decoded = InitiateResponse::from_bytes(&bytes).unwrap();
+        assert_eq!(res, decoded);
+
+        let user_information = res.to_user_information().unwrap();
+        let decoded_from_ui = InitiateResponse::from_user_information(&user_information).unwrap();
+        assert_eq!(res, decoded_from_ui);
     }
 }
 
@@ -652,6 +804,177 @@ pub struct InitiateRequest {
     pub client_max_receive_pdu_size: u16,
 }
 
+impl InitiateRequest {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
+        let mut bytes = Vec::new();
+        bytes.push(0x01);
+
+        if let Some(key) = &self.dedicated_key {
+            bytes.push(0x01);
+            encode_object_count(key.len(), &mut bytes);
+            bytes.extend_from_slice(key);
+        } else {
+            bytes.push(0x00);
+        }
+
+        if self.response_allowed {
+            bytes.push(0x00);
+        } else {
+            bytes.push(0x01);
+            bytes.push(0x00);
+        }
+
+        if let Some(qos) = self.proposed_quality_of_service {
+            bytes.push(0x01);
+            bytes.push(qos);
+        } else {
+            bytes.push(0x00);
+        }
+
+        bytes.push(self.proposed_dlms_version_number);
+        bytes.push(0x5F);
+        bytes.push(0x1F);
+        bytes.push(0x04);
+        bytes.push(0x00);
+        bytes.extend_from_slice(&self.proposed_conformance.to_bytes());
+        bytes.extend_from_slice(&self.client_max_receive_pdu_size.to_be_bytes());
+
+        Ok(bytes)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DlmsError> {
+        if bytes.is_empty() || bytes[0] != 0x01 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        let mut index = 1;
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+
+        let dedicated_key_flag = bytes[index];
+        index += 1;
+        let dedicated_key = if dedicated_key_flag == 0 {
+            None
+        } else {
+            let (len, consumed) = decode_object_count(&bytes[index..])?;
+            index += consumed;
+            if bytes.len() < index + len {
+                return Err(DlmsError::Xdlms);
+            }
+            let key = bytes[index..index + len].to_vec();
+            index += len;
+            Some(key)
+        };
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let response_flag = bytes[index];
+        index += 1;
+        let response_allowed = if response_flag == 0 {
+            true
+        } else {
+            if index >= bytes.len() {
+                return Err(DlmsError::Xdlms);
+            }
+            let value = bytes[index];
+            index += 1;
+            value != 0
+        };
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let qos_flag = bytes[index];
+        index += 1;
+        let proposed_quality_of_service = if qos_flag == 0 {
+            None
+        } else {
+            if index >= bytes.len() {
+                return Err(DlmsError::Xdlms);
+            }
+            let value = bytes[index];
+            index += 1;
+            Some(value)
+        };
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let proposed_dlms_version_number = bytes[index];
+        index += 1;
+
+        if bytes.len() < index + 2 {
+            return Err(DlmsError::Xdlms);
+        }
+        if bytes[index] != 0x5F || bytes[index + 1] != 0x1F {
+            return Err(DlmsError::Xdlms);
+        }
+        index += 2;
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let conformance_length = bytes[index];
+        index += 1;
+        if conformance_length != 0x04 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let unused_bits = bytes[index];
+        index += 1;
+        if unused_bits != 0x00 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        if bytes.len() < index + 3 {
+            return Err(DlmsError::Xdlms);
+        }
+        let proposed_conformance = Conformance::from_bytes(&bytes[index..index + 3])?;
+        index += 3;
+
+        if bytes.len() < index + 2 {
+            return Err(DlmsError::Xdlms);
+        }
+        let client_max_receive_pdu_size = u16::from_be_bytes([bytes[index], bytes[index + 1]]);
+        index += 2;
+
+        if index != bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+
+        Ok(InitiateRequest {
+            dedicated_key,
+            response_allowed,
+            proposed_quality_of_service,
+            proposed_dlms_version_number,
+            proposed_conformance,
+            client_max_receive_pdu_size,
+        })
+    }
+
+    pub fn to_user_information(&self) -> Result<Vec<u8>, DlmsError> {
+        let apdu = self.to_bytes()?;
+        let mut buffer = Vec::with_capacity(apdu.len() + 2);
+        buffer.push(0x04);
+        encode_object_count(apdu.len(), &mut buffer);
+        buffer.extend_from_slice(&apdu);
+        Ok(buffer)
+    }
+
+    pub fn from_user_information(bytes: &[u8]) -> Result<Self, DlmsError> {
+        let (apdu, consumed) = decode_octet_string(bytes)?;
+        if consumed != bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        InitiateRequest::from_bytes(apdu)
+    }
+}
+
 // --- InitiateResponse ---
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitiateResponse {
@@ -662,10 +985,155 @@ pub struct InitiateResponse {
     pub vaa_name: u16,
 }
 
-// --- Conformance ---
-#[derive(Debug, Clone, PartialEq)]
-pub struct Conformance {
-    pub value: u32,
+impl InitiateResponse {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, DlmsError> {
+        let mut bytes = Vec::new();
+        bytes.push(0x08);
+
+        if let Some(qos) = self.negotiated_quality_of_service {
+            bytes.push(0x01);
+            bytes.push(qos);
+        } else {
+            bytes.push(0x00);
+        }
+
+        bytes.push(self.negotiated_dlms_version_number);
+        bytes.push(0x5F);
+        bytes.push(0x1F);
+        bytes.push(0x04);
+        bytes.push(0x00);
+        bytes.extend_from_slice(&self.negotiated_conformance.to_bytes());
+        bytes.extend_from_slice(&self.server_max_receive_pdu_size.to_be_bytes());
+        bytes.extend_from_slice(&self.vaa_name.to_be_bytes());
+
+        Ok(bytes)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DlmsError> {
+        if bytes.is_empty() || bytes[0] != 0x08 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        let mut index = 1;
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+
+        let qos_flag = bytes[index];
+        index += 1;
+        let negotiated_quality_of_service = if qos_flag == 0 {
+            None
+        } else {
+            if index >= bytes.len() {
+                return Err(DlmsError::Xdlms);
+            }
+            let value = bytes[index];
+            index += 1;
+            Some(value)
+        };
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let negotiated_dlms_version_number = bytes[index];
+        index += 1;
+
+        if bytes.len() < index + 2 {
+            return Err(DlmsError::Xdlms);
+        }
+        if bytes[index] != 0x5F || bytes[index + 1] != 0x1F {
+            return Err(DlmsError::Xdlms);
+        }
+        index += 2;
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let conformance_length = bytes[index];
+        index += 1;
+        if conformance_length != 0x04 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        if index >= bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        let unused_bits = bytes[index];
+        index += 1;
+        if unused_bits != 0x00 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        if bytes.len() < index + 3 {
+            return Err(DlmsError::Xdlms);
+        }
+        let negotiated_conformance = Conformance::from_bytes(&bytes[index..index + 3])?;
+        index += 3;
+
+        if bytes.len() < index + 2 {
+            return Err(DlmsError::Xdlms);
+        }
+        let server_max_receive_pdu_size = u16::from_be_bytes([bytes[index], bytes[index + 1]]);
+        index += 2;
+
+        if bytes.len() < index + 2 {
+            return Err(DlmsError::Xdlms);
+        }
+        let vaa_name = u16::from_be_bytes([bytes[index], bytes[index + 1]]);
+        index += 2;
+
+        if index != bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+
+        Ok(InitiateResponse {
+            negotiated_quality_of_service,
+            negotiated_dlms_version_number,
+            negotiated_conformance,
+            server_max_receive_pdu_size,
+            vaa_name,
+        })
+    }
+
+    pub fn to_user_information(&self) -> Result<Vec<u8>, DlmsError> {
+        let apdu = self.to_bytes()?;
+        let mut buffer = Vec::with_capacity(apdu.len() + 2);
+        buffer.push(0x04);
+        encode_object_count(apdu.len(), &mut buffer);
+        buffer.extend_from_slice(&apdu);
+        Ok(buffer)
+    }
+
+    pub fn from_user_information(bytes: &[u8]) -> Result<Self, DlmsError> {
+        let (apdu, consumed) = decode_octet_string(bytes)?;
+        if consumed != bytes.len() {
+            return Err(DlmsError::Xdlms);
+        }
+        InitiateResponse::from_bytes(apdu)
+    }
+}
+
+impl AssociationParameters {
+    pub fn to_initiate_request(&self) -> InitiateRequest {
+        InitiateRequest {
+            dedicated_key: None,
+            response_allowed: true,
+            proposed_quality_of_service: self.quality_of_service,
+            proposed_dlms_version_number: self.dlms_version,
+            proposed_conformance: self.conformance.clone(),
+            client_max_receive_pdu_size: self.max_receive_pdu_size,
+        }
+    }
+
+    pub fn to_initiate_response(&self, negotiated_conformance: Conformance) -> InitiateResponse {
+        InitiateResponse {
+            negotiated_quality_of_service: self.quality_of_service,
+            negotiated_dlms_version_number: self.dlms_version,
+            negotiated_conformance,
+            server_max_receive_pdu_size: self.max_receive_pdu_size,
+            vaa_name: 0x0007,
+        }
+    }
 }
 
 // --- Set-Response ---
