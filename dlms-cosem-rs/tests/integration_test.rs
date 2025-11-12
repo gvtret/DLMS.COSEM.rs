@@ -68,6 +68,11 @@ fn test_association() {
 
     let aare = client.associate().expect("Association failed");
     assert_eq!(aare.result, 0);
+    let negotiated = client
+        .negotiated_parameters()
+        .expect("expected negotiated parameters");
+    assert_eq!(negotiated.negotiated_dlms_version_number, 6);
+    assert_eq!(negotiated.negotiated_conformance.value, 0x0010_0000);
 }
 
 #[test]

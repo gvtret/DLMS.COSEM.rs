@@ -62,6 +62,64 @@ fn decode_octet_string(bytes: &[u8]) -> Result<(&[u8], usize), DlmsError> {
 
 pub type InvokeIdAndPriority = u8;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conformance {
+    pub value: u32,
+}
+
+impl Conformance {
+    pub fn to_bytes(&self) -> [u8; 3] {
+        [
+            ((self.value >> 16) & 0xFF) as u8,
+            ((self.value >> 8) & 0xFF) as u8,
+            (self.value & 0xFF) as u8,
+        ]
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DlmsError> {
+        if bytes.len() < 3 {
+            return Err(DlmsError::Xdlms);
+        }
+
+        Ok(Conformance {
+            value: ((bytes[0] as u32) << 16) | ((bytes[1] as u32) << 8) | bytes[2] as u32,
+        })
+    }
+
+    pub fn intersection(&self, other: &Conformance) -> Conformance {
+        Conformance {
+            value: self.value & other.value,
+        }
+    }
+
+    pub fn contains(&self, other: &Conformance) -> bool {
+        self.value & other.value == other.value
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.value == 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssociationParameters {
+    pub dlms_version: u8,
+    pub conformance: Conformance,
+    pub max_receive_pdu_size: u16,
+    pub quality_of_service: Option<u8>,
+}
+
+impl Default for AssociationParameters {
+    fn default() -> Self {
+        AssociationParameters {
+            dlms_version: 6,
+            conformance: Conformance { value: 0x0010_0000 },
+            max_receive_pdu_size: 0x0400,
+            quality_of_service: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectiveAccessDescriptor {
     pub access_selector: u8,
@@ -1055,10 +1113,27 @@ impl InitiateResponse {
     }
 }
 
-// --- Conformance ---
-#[derive(Debug, Clone, PartialEq)]
-pub struct Conformance {
-    pub value: u32,
+impl AssociationParameters {
+    pub fn to_initiate_request(&self) -> InitiateRequest {
+        InitiateRequest {
+            dedicated_key: None,
+            response_allowed: true,
+            proposed_quality_of_service: self.quality_of_service,
+            proposed_dlms_version_number: self.dlms_version,
+            proposed_conformance: self.conformance.clone(),
+            client_max_receive_pdu_size: self.max_receive_pdu_size,
+        }
+    }
+
+    pub fn to_initiate_response(&self, negotiated_conformance: Conformance) -> InitiateResponse {
+        InitiateResponse {
+            negotiated_quality_of_service: self.quality_of_service,
+            negotiated_dlms_version_number: self.dlms_version,
+            negotiated_conformance,
+            server_max_receive_pdu_size: self.max_receive_pdu_size,
+            vaa_name: 0x0007,
+        }
+    }
 }
 
 impl Conformance {
