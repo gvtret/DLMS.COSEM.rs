@@ -1,4 +1,5 @@
 use crate::acse::{AareApdu, AarqApdu, ArlreApdu, ArlrqApdu};
+use crate::association_ln::{AssociationLN, ObjectListEntry};
 use crate::cosem_object::CosemObject;
 use crate::error::DlmsError;
 use crate::hdlc::{HdlcFrame, HdlcFrameError};
@@ -11,6 +12,10 @@ use crate::xdlms::{
     InitiateResponse, SetRequest, SetResponse, SetResponseNormal,
 };
 use rand_core::{OsRng, RngCore};
+use std::sync::{Arc, Mutex};
+
+const DEFAULT_ASSOCIATION_LN: [u8; 6] = [0x00, 0x00, 0x28, 0x00, 0x00, 0xFF];
+const DEFAULT_CLIENT_SAP: u16 = 0x0001;
 use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::vec::Vec;
@@ -45,6 +50,7 @@ pub struct Server<T: Transport> {
     lls_challenges: BTreeMap<u16, Vec<u8>>,
     association_parameters: AssociationParameters,
     active_associations: BTreeMap<u16, AssociationContext>,
+    association_object_list: Arc<Mutex<Vec<ObjectListEntry>>>,
 }
 
 impl<T: Transport> Server<T> {
@@ -54,7 +60,14 @@ impl<T: Transport> Server<T> {
         password: Option<Vec<u8>>,
         key: Option<Vec<u8>>,
     ) -> Self {
-        Server {
+        let association_object_list = Arc::new(Mutex::new(Vec::new()));
+        let auth_mechanism_name = if password.is_some() {
+            b"LLS".to_vec()
+        } else {
+            b"NO_AUTH".to_vec()
+        };
+
+        let mut server = Server {
             address,
             transport,
             password,
@@ -63,7 +76,23 @@ impl<T: Transport> Server<T> {
             lls_challenges: BTreeMap::new(),
             association_parameters: AssociationParameters::default(),
             active_associations: BTreeMap::new(),
-        }
+            association_object_list,
+        };
+
+        let association_ln = AssociationLN::new(
+            Arc::clone(&server.association_object_list),
+            ((DEFAULT_CLIENT_SAP as u32) << 16) | address as u32,
+            b"LN_WITH_NO_CIPHERING".to_vec(),
+            Vec::new(),
+            auth_mechanism_name,
+        );
+
+        server.register_object_internal(DEFAULT_ASSOCIATION_LN, Box::new(association_ln));
+        server
+    }
+
+    pub fn set_association_parameters(&mut self, params: AssociationParameters) {
+        self.association_parameters = params;
     }
 
     pub fn set_association_parameters(&mut self, params: AssociationParameters) {
@@ -71,7 +100,27 @@ impl<T: Transport> Server<T> {
     }
 
     pub fn register_object(&mut self, instance_id: [u8; 6], object: Box<dyn CosemObject>) {
+        self.register_object_internal(instance_id, object);
+    }
+
+    fn register_object_internal(&mut self, instance_id: [u8; 6], object: Box<dyn CosemObject>) {
         self.objects.insert(instance_id, object);
+        self.rebuild_association_object_list();
+    }
+
+    fn rebuild_association_object_list(&self) {
+        let mut list = self
+            .association_object_list
+            .lock()
+            .expect("association object list poisoned");
+        list.clear();
+        for (logical_name, object) in &self.objects {
+            list.push(ObjectListEntry {
+                class_id: object.class_id(),
+                version: 0,
+                logical_name: *logical_name,
+            });
+        }
     }
 
     pub fn run(&mut self) -> Result<(), ServerError<T::Error>> {
@@ -405,6 +454,7 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::cosem::{CosemAttributeDescriptor, CosemMethodDescriptor};
+    use crate::register::Register;
     use crate::types::CosemData;
     use crate::xdlms::{
         ActionRequest, ActionRequestNormal, ActionResponse, ActionResult, AssociationParameters,
@@ -452,6 +502,33 @@ mod tests {
 
     fn default_initiate_request() -> InitiateRequest {
         AssociationParameters::default().to_initiate_request()
+    }
+
+    #[test]
+    fn association_object_list_tracks_registered_objects() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        {
+            let list = server
+                .association_object_list
+                .lock()
+                .expect("association list poisoned");
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].logical_name, DEFAULT_ASSOCIATION_LN);
+            assert_eq!(list[0].class_id, 15);
+        }
+
+        let logical_name = [0, 0, 1, 0, 0, 255];
+        server.register_object(logical_name, Box::new(Register::new()));
+
+        let list = server
+            .association_object_list
+            .lock()
+            .expect("association list poisoned");
+        assert_eq!(list.len(), 2);
+        assert!(list
+            .iter()
+            .any(|entry| entry.logical_name == logical_name && entry.class_id == 3));
     }
 
     #[test]

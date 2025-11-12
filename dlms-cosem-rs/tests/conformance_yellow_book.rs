@@ -13,6 +13,7 @@ use dlms_cosem::xdlms::{
 use std::boxed::Box;
 use std::io::{Read, Write};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::vec::Vec;
 
@@ -217,7 +218,7 @@ fn yellow_book_conformance_test_action_request() {
 
     let instance_id = [0, 0, 15, 0, 0, 255];
     let association_ln = dlms_cosem::association_ln::AssociationLN::new(
-        Vec::new(),
+        Arc::new(Mutex::new(Vec::new())),
         0,
         Vec::new(),
         Vec::new(),
