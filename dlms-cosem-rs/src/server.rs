@@ -7,8 +7,8 @@ use crate::security::{hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
 use crate::xdlms::{
     ActionRequest, ActionResponse, ActionResponseNormal, ActionResult, DataAccessResult,
-    GetDataResult, GetRequest, GetResponse, GetResponseNormal, SetRequest, SetResponse,
-    SetResponseNormal,
+    GetDataResult, GetRequest, GetResponse, GetResponseNormal, InitiateRequest, InitiateResponse,
+    SetRequest, SetResponse, SetResponseNormal,
 };
 use rand_core::{OsRng, RngCore};
 use std::boxed::Box;
@@ -92,20 +92,31 @@ impl<T: Transport> Server<T> {
     fn handle_request(&mut self, request_bytes: &[u8]) -> Result<Vec<u8>, ServerError<T::Error>> {
         let request_frame = HdlcFrame::from_bytes(request_bytes)?;
 
-        let response_bytes = if let Ok(aarq) = AarqApdu::from_bytes(&request_frame.information) {
+        let response_bytes = if let Ok((_, aarq_apdu)) =
+            AarqApdu::from_bytes(&request_frame.information)
+        {
+            let initiate_request =
+                InitiateRequest::from_user_information(&aarq_apdu.user_information)?;
             let mut aare = AareApdu {
-                application_context_name: aarq.1.application_context_name.clone(),
+                application_context_name: aarq_apdu.application_context_name.clone(),
                 result: 0,
                 result_source_diagnostic: 0,
                 responding_authentication_value: None,
-                user_information: Vec::new(),
+                user_information: InitiateResponse {
+                    negotiated_quality_of_service: initiate_request.proposed_quality_of_service,
+                    negotiated_dlms_version_number: initiate_request.proposed_dlms_version_number,
+                    negotiated_conformance: initiate_request.proposed_conformance.clone(),
+                    server_max_receive_pdu_size: initiate_request.client_max_receive_pdu_size,
+                    vaa_name: 0x0007,
+                }
+                .to_user_information()?,
             };
             if let (Some(password), Some(mechanism_name)) =
-                (&self.password, aarq.1.mechanism_name.as_ref())
+                (&self.password, aarq_apdu.mechanism_name.as_ref())
             {
                 let association_address = request_frame.address;
                 if mechanism_name == b"LLS" {
-                    if let Some(auth_value) = aarq.1.calling_authentication_value {
+                    if let Some(auth_value) = aarq_apdu.calling_authentication_value.clone() {
                         if let Some(challenge) = self.lls_challenges.get(&association_address) {
                             match lls_authenticate(password, challenge) {
                                 Ok(expected_response) => {
@@ -130,7 +141,6 @@ impl<T: Transport> Server<T> {
                     }
                 }
             }
-            aare.user_information.extend_from_slice(b"user_info");
             aare.to_bytes()?
         } else if let Ok(get_req) = GetRequest::from_bytes(&request_frame.information) {
             let GetRequest::Normal(get_req) = get_req else {
@@ -222,6 +232,7 @@ impl<T: Transport> Server<T> {
 mod tests {
     extern crate std;
     use super::*;
+    use crate::xdlms::{Conformance, InitiateRequest, InitiateResponse};
 
     struct DummyTransport;
 
@@ -254,16 +265,30 @@ mod tests {
             .1
     }
 
+    fn default_initiate_request() -> InitiateRequest {
+        InitiateRequest {
+            dedicated_key: None,
+            response_allowed: true,
+            proposed_quality_of_service: None,
+            proposed_dlms_version_number: 6,
+            proposed_conformance: Conformance { value: 0x0010_0000 },
+            client_max_receive_pdu_size: 0x0400,
+        }
+    }
+
     #[test]
     fn lls_challenge_is_issued_and_persisted() {
         let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
+        let user_information = default_initiate_request()
+            .to_user_information()
+            .expect("failed to encode initiate request");
         let aarq = AarqApdu {
             application_context_name: b"CTX".to_vec(),
             sender_acse_requirements: 0,
             mechanism_name: Some(b"LLS".to_vec()),
             calling_authentication_value: None,
-            user_information: b"info".to_vec(),
+            user_information: user_information.clone(),
         };
         let aarq_bytes = aarq.to_bytes().expect("failed to encode aarq");
         assert!(AarqApdu::from_bytes(&aarq_bytes).is_ok());
@@ -281,6 +306,12 @@ mod tests {
             .responding_authentication_value
             .expect("expected challenge in response");
 
+        let initiate_response = InitiateResponse::from_user_information(&aare.user_information)
+            .expect("expected initiate response");
+        assert_eq!(initiate_response.negotiated_dlms_version_number, 6);
+        assert_eq!(initiate_response.server_max_receive_pdu_size, 0x0400);
+        assert_eq!(initiate_response.vaa_name, 0x0007);
+
         assert_eq!(challenge.len(), 16);
         let stored = server
             .lls_challenges
@@ -294,12 +325,15 @@ mod tests {
         let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
         let association_address = 0x0003;
+        let user_information = default_initiate_request()
+            .to_user_information()
+            .expect("failed to encode initiate request");
         let aarq = AarqApdu {
             application_context_name: b"CTX".to_vec(),
             sender_acse_requirements: 0,
             mechanism_name: Some(b"LLS".to_vec()),
             calling_authentication_value: None,
-            user_information: b"info".to_vec(),
+            user_information: user_information.clone(),
         };
         let aarq_bytes = aarq.to_bytes().expect("failed to encode aarq");
         assert!(AarqApdu::from_bytes(&aarq_bytes).is_ok());
@@ -327,7 +361,7 @@ mod tests {
                 sender_acse_requirements: 0,
                 mechanism_name: Some(b"LLS".to_vec()),
                 calling_authentication_value: Some(expected_response.clone()),
-                user_information: b"info".to_vec(),
+                user_information: user_information.clone(),
             },
         );
 
@@ -338,6 +372,9 @@ mod tests {
 
         assert_eq!(aare.result, 0);
         assert!(aare.responding_authentication_value.is_none());
+        let initiate_response = InitiateResponse::from_user_information(&aare.user_information)
+            .expect("expected initiate response");
+        assert_eq!(initiate_response.server_max_receive_pdu_size, 0x0400);
         assert!(!server.lls_challenges.contains_key(&association_address));
     }
 
@@ -346,6 +383,9 @@ mod tests {
         let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
         let association_address = 0x0004;
+        let user_information = default_initiate_request()
+            .to_user_information()
+            .expect("failed to encode initiate request");
         let initial_request = build_hdlc_request(
             association_address,
             AarqApdu {
@@ -353,7 +393,7 @@ mod tests {
                 sender_acse_requirements: 0,
                 mechanism_name: Some(b"LLS".to_vec()),
                 calling_authentication_value: None,
-                user_information: b"info".to_vec(),
+                user_information: user_information.clone(),
             },
         );
 
@@ -376,7 +416,7 @@ mod tests {
                     sender_acse_requirements: 0,
                     mechanism_name: Some(b"LLS".to_vec()),
                     calling_authentication_value: Some(wrong_response),
-                    user_information: b"info".to_vec(),
+                    user_information,
                 },
             ))
             .expect("server failed to process response");
@@ -385,6 +425,9 @@ mod tests {
 
         assert_eq!(aare.result, 1);
         assert!(aare.responding_authentication_value.is_none());
+        let initiate_response = InitiateResponse::from_user_information(&aare.user_information)
+            .expect("expected initiate response");
+        assert_eq!(initiate_response.vaa_name, 0x0007);
         assert!(!server
             .lls_challenges
             .get(&association_address)
