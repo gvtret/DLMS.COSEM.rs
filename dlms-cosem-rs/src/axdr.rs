@@ -1,27 +1,27 @@
 use crate::error::DlmsError;
-use crate::types::Data;
+use crate::types::CosemData;
 use std::vec::Vec;
 
-pub fn encode_data(data: &Data, buffer: &mut Vec<u8>) -> Result<(), DlmsError> {
+pub fn encode_data(data: &CosemData, buffer: &mut Vec<u8>) -> Result<(), DlmsError> {
     match data {
-        Data::NullData => buffer.push(0),
-        Data::Boolean(val) => {
+        CosemData::NullData => buffer.push(0),
+        CosemData::Boolean(val) => {
             buffer.push(3);
             buffer.push(*val as u8);
         }
-        Data::Integer(val) => {
+        CosemData::Integer(val) => {
             buffer.push(15);
             buffer.push(*val as u8);
         }
-        Data::Unsigned(val) => {
+        CosemData::Unsigned(val) => {
             buffer.push(17);
             buffer.push(*val);
         }
-        Data::LongUnsigned(val) => {
+        CosemData::LongUnsigned(val) => {
             buffer.push(18);
             buffer.extend_from_slice(&val.to_be_bytes());
         }
-        Data::OctetString(val) => {
+        CosemData::OctetString(val) => {
             buffer.push(9);
             buffer.push(val.len() as u8);
             buffer.extend_from_slice(val);
@@ -31,34 +31,34 @@ pub fn encode_data(data: &Data, buffer: &mut Vec<u8>) -> Result<(), DlmsError> {
     Ok(())
 }
 
-pub fn decode_data(buffer: &[u8]) -> Result<(Data, &[u8]), DlmsError> {
+pub fn decode_data(buffer: &[u8]) -> Result<(CosemData, &[u8]), DlmsError> {
     if buffer.is_empty() {
         return Err(DlmsError::Xdlms);
     }
 
     let (tag, rest) = buffer.split_at(1);
     match tag[0] {
-        0 => Ok((Data::NullData, rest)),
+        0 => Ok((CosemData::NullData, rest)),
         3 => {
             if rest.is_empty() {
                 return Err(DlmsError::Xdlms);
             }
             let (val, rest) = rest.split_at(1);
-            Ok((Data::Boolean(val[0] != 0), rest))
+            Ok((CosemData::Boolean(val[0] != 0), rest))
         }
         15 => {
             if rest.is_empty() {
                 return Err(DlmsError::Xdlms);
             }
             let (val, rest) = rest.split_at(1);
-            Ok((Data::Integer(val[0] as i8), rest))
+            Ok((CosemData::Integer(val[0] as i8), rest))
         }
         17 => {
             if rest.is_empty() {
                 return Err(DlmsError::Xdlms);
             }
             let (val, rest) = rest.split_at(1);
-            Ok((Data::Unsigned(val[0]), rest))
+            Ok((CosemData::Unsigned(val[0]), rest))
         }
         18 => {
             if rest.len() < 2 {
@@ -66,7 +66,7 @@ pub fn decode_data(buffer: &[u8]) -> Result<(Data, &[u8]), DlmsError> {
             }
             let (val, rest) = rest.split_at(2);
             Ok((
-                Data::LongUnsigned(u16::from_be_bytes(val.try_into().unwrap())),
+                CosemData::LongUnsigned(u16::from_be_bytes(val.try_into().unwrap())),
                 rest,
             ))
         }
@@ -80,7 +80,7 @@ pub fn decode_data(buffer: &[u8]) -> Result<(Data, &[u8]), DlmsError> {
                 return Err(DlmsError::Xdlms);
             }
             let (val, rest) = rest.split_at(len);
-            Ok((Data::OctetString(val.to_vec()), rest))
+            Ok((CosemData::OctetString(val.to_vec()), rest))
         }
 
         _ => Err(DlmsError::Xdlms), // not all variants are supported yet

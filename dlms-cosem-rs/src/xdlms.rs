@@ -1,7 +1,7 @@
 use crate::axdr::{decode_data, encode_data};
 use crate::cosem::{CosemAttributeDescriptor, CosemMethodDescriptor};
 use crate::error::DlmsError;
-use crate::types::Data;
+use crate::types::CosemData;
 use std::vec::Vec;
 
 pub type InvokeIdAndPriority = u8;
@@ -9,7 +9,7 @@ pub type InvokeIdAndPriority = u8;
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectiveAccessDescriptor {
     pub access_selector: u8,
-    pub access_parameters: Data,
+    pub access_parameters: CosemData,
 }
 
 // --- Get-Request ---
@@ -201,7 +201,7 @@ mod tests {
     fn test_get_response_normal_serialization_deserialization() {
         let res = GetResponse::Normal(GetResponseNormal {
             invoke_id_and_priority: 1,
-            result: GetDataResult::Data(Data::NullData),
+            result: GetDataResult::Data(CosemData::NullData),
         });
 
         let bytes = res.to_bytes().unwrap();
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn test_get_response_with_list_serialization_deserialization() {
         let mut list = Vec::new();
-        list.push(GetDataResult::Data(Data::NullData));
+        list.push(GetDataResult::Data(CosemData::NullData));
         list.push(GetDataResult::DataAccessResult(
             DataAccessResult::Success,
         ));
@@ -258,7 +258,7 @@ mod tests {
                 attribute_id: 2,
             },
             access_selection: None,
-            value: Data::NullData,
+            value: CosemData::NullData,
         });
 
         let bytes = req.to_bytes().unwrap();
@@ -361,7 +361,7 @@ impl From<DataAccessResult> for u8 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetDataResult {
-    Data(Data),
+    Data(CosemData),
     DataAccessResult(DataAccessResult),
 }
 
@@ -550,14 +550,14 @@ pub struct SetRequestNormal {
     pub invoke_id_and_priority: InvokeIdAndPriority,
     pub cosem_attribute_descriptor: CosemAttributeDescriptor,
     pub access_selection: Option<SelectiveAccessDescriptor>,
-    pub value: Data,
+    pub value: CosemData,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetRequestWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
     pub attribute_descriptor_list: Vec<CosemAttributeDescriptor>,
-    pub value_list: Vec<Data>,
+    pub value_list: Vec<CosemData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -742,14 +742,14 @@ impl SetResponse {
 pub struct ActionRequestNormal {
     pub invoke_id_and_priority: InvokeIdAndPriority,
     pub cosem_method_descriptor: CosemMethodDescriptor,
-    pub method_invocation_parameters: Option<Data>,
+    pub method_invocation_parameters: Option<CosemData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionRequestWithList {
     pub invoke_id_and_priority: InvokeIdAndPriority,
     pub cosem_method_descriptor_list: Vec<CosemMethodDescriptor>,
-    pub method_invocation_parameters: Vec<Data>,
+    pub method_invocation_parameters: Vec<CosemData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

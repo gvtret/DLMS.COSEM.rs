@@ -6,7 +6,7 @@ use dlms_cosem::server::Server;
 use dlms_cosem::cosem::{CosemAttributeDescriptor, CosemMethodDescriptor};
 use dlms_cosem::cosem_object::CosemObject;
 use dlms_cosem::register::Register;
-use dlms_cosem::types::Data;
+use dlms_cosem::types::CosemData;
 use dlms_cosem::xdlms::{GetRequest, GetRequestNormal, SetRequest, SetRequestNormal, ActionRequest, ActionRequestNormal};
 use std::io::{Read, Write};
 use std::sync::mpsc;
@@ -98,7 +98,7 @@ fn yellow_book_conformance_test_get_request() {
 
     let instance_id = [0, 0, 1, 0, 0, 255];
     let mut register = Register::new();
-    register.set_attribute(2, Data::Unsigned(10)).unwrap();
+    register.set_attribute(2, CosemData::Unsigned(10)).unwrap();
     server.register_object(instance_id, Box::new(register));
 
     let _server_thread = thread::spawn(move || {
@@ -120,7 +120,7 @@ fn yellow_book_conformance_test_get_request() {
     let res = client.send_get_request(req).unwrap();
     if let dlms_cosem::xdlms::GetResponse::Normal(res) = res {
         if let dlms_cosem::xdlms::GetDataResult::Data(data) = res.result {
-            assert_eq!(data, Data::Unsigned(10));
+            assert_eq!(data, CosemData::Unsigned(10));
         } else {
             panic!("Incorrect response type");
         }
@@ -167,7 +167,7 @@ fn yellow_book_conformance_test_set_request() {
             attribute_id: 2,
         },
         access_selection: None,
-        value: Data::Unsigned(20),
+        value: CosemData::Unsigned(20),
     });
     client.send_set_request(req).unwrap();
 
@@ -184,7 +184,7 @@ fn yellow_book_conformance_test_set_request() {
     let res = client.send_get_request(req).unwrap();
     if let dlms_cosem::xdlms::GetResponse::Normal(res) = res {
         if let dlms_cosem::xdlms::GetDataResult::Data(data) = res.result {
-            assert_eq!(data, Data::Unsigned(20));
+            assert_eq!(data, CosemData::Unsigned(20));
         } else {
             panic!("Incorrect response type");
         }
@@ -238,13 +238,13 @@ fn yellow_book_conformance_test_action_request() {
             instance_id,
             method_id: 1,
         },
-        method_invocation_parameters: Some(Data::OctetString(challenge)),
+        method_invocation_parameters: Some(CosemData::OctetString(challenge)),
     });
 
     let res = client.send_action_request(req).unwrap();
     if let dlms_cosem::xdlms::ActionResponse::Normal(res) = res {
         assert_eq!(res.single_response.result, dlms_cosem::xdlms::ActionResult::Success);
-        if let Some(dlms_cosem::xdlms::GetDataResult::Data(Data::OctetString(response))) = res.single_response.return_parameters {
+        if let Some(dlms_cosem::xdlms::GetDataResult::Data(CosemData::OctetString(response))) = res.single_response.return_parameters {
             assert_eq!(response.as_slice(), b"server_response");
         } else {
             panic!("Incorrect response type");

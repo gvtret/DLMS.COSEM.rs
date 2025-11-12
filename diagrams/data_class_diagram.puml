@@ -1,0 +1,18 @@
+@startuml
+!theme vibrant
+
+class Data {
+  - value: CosemData
+  + new(value: CosemData)
+}
+
+interface CosemObject {
+  + class_id()
+  + get_attribute()
+  + set_attribute()
+  + invoke_method()
+}
+
+Data ..|> CosemObject
+
+@enduml

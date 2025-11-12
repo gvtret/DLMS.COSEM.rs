@@ -1,6 +1,6 @@
 use dlms_cosem::association_ln::AssociationLN;
 use dlms_cosem::cosem_object::CosemObject;
-use dlms_cosem::types::Data as CosemData;
+use dlms_cosem::types::CosemData;
 
 #[test]
 fn test_association_ln_new() {
