@@ -1,4 +1,3 @@
-
 pub type CosemClassId = u16;
 pub type CosemObjectInstanceId = [u8; 6];
 pub type CosemObjectAttributeId = i8;

@@ -1,5 +1,14 @@
 @startuml
-!theme vibrant
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam package {
+  BackgroundColor #F9FBFF
+  BorderColor #1F2A38
+}
+skinparam component {
+  BackgroundColor #F9FBFF
+  BorderColor #1F2A38
+}
 
 package "DLMS/COSEM Library" {
   [Client]
