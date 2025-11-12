@@ -1,9 +1,11 @@
-use crate::acse::{AarqApdu, AareApdu};
+use crate::acse::{AareApdu, AarqApdu};
 use crate::error::DlmsError;
 use crate::hdlc::HdlcFrame;
-use crate::security::{lls_authenticate, hls_decrypt, hls_encrypt, SecurityError};
+use crate::security::{hls_decrypt, hls_encrypt, lls_authenticate, SecurityError};
 use crate::transport::Transport;
-use crate::xdlms::{GetRequest, GetResponse, SetRequest, SetResponse, ActionRequest, ActionResponse};
+use crate::xdlms::{
+    ActionRequest, ActionResponse, GetRequest, GetResponse, SetRequest, SetResponse,
+};
 use std::vec::Vec;
 
 #[derive(Debug)]
@@ -75,9 +77,10 @@ impl<T: Transport> Client<T> {
             .map_err(|_| ClientError::AcseError)?
             .1;
 
-        if let (Some(password), Some(challenge)) =
-            (&self.password, aare.responding_authentication_value.as_ref())
-        {
+        if let (Some(password), Some(challenge)) = (
+            &self.password,
+            aare.responding_authentication_value.as_ref(),
+        ) {
             let response = lls_authenticate(password, challenge)?;
             let aarq = AarqApdu {
                 application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
@@ -165,10 +168,7 @@ impl<T: Transport> Client<T> {
         Ok(response)
     }
 
-    fn send_and_receive(
-        &mut self,
-        data: &[u8],
-    ) -> Result<Vec<u8>, ClientError<T::Error>> {
+    fn send_and_receive(&mut self, data: &[u8]) -> Result<Vec<u8>, ClientError<T::Error>> {
         if let Some(key) = &self.key {
             let encrypted_data = hls_encrypt(data, key)?;
             self.transport
@@ -183,7 +183,9 @@ impl<T: Transport> Client<T> {
             self.transport
                 .send(data)
                 .map_err(ClientError::TransportError)?;
-            self.transport.receive().map_err(ClientError::TransportError)
+            self.transport
+                .receive()
+                .map_err(ClientError::TransportError)
         }
     }
 }

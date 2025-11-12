@@ -1,5 +1,5 @@
-use dlms_cosem::data::Data;
 use dlms_cosem::cosem_object::CosemObject;
+use dlms_cosem::data::Data;
 use dlms_cosem::types::CosemData;
 
 #[test]
