@@ -16,6 +16,7 @@ done
 
 shopt -s nullglob
 
+rm -rf "$DOCS_DIR"
 mkdir -p "$PLANTUML_OUTPUT_DIR" "$MARKDOWN_OUTPUT_DIR"
 PDF_MARKDOWN_DIR="$MARKDOWN_OUTPUT_DIR/pdfs"
 mkdir -p "$PDF_MARKDOWN_DIR"
@@ -23,12 +24,18 @@ mkdir -p "$PDF_MARKDOWN_DIR"
 echo "Generating API documentation with Doxygen..."
 doxygen "$ROOT_DIR/docs/Doxyfile"
 
+generated_diagrams=()
+
 if compgen -G "$ROOT_DIR/diagrams/*.puml" > /dev/null; then
   echo "Rendering PlantUML diagrams to SVG and PDF..."
   pushd "$ROOT_DIR/diagrams" >/dev/null
   plantuml -tsvg -o ../docs/generated/plantuml *.puml
   plantuml -tpdf -o ../docs/generated/plantuml *.puml
   popd >/dev/null
+  for diagram in "$PLANTUML_OUTPUT_DIR"/*.svg; do
+    diagram_base="$(basename "$diagram" .svg)"
+    generated_diagrams+=("$diagram_base")
+  done
 else
   echo "No PlantUML diagrams found under $ROOT_DIR/diagrams." >&2
 fi
@@ -38,6 +45,7 @@ pandoc "$ROOT_DIR/README.md" -o "$MARKDOWN_OUTPUT_DIR/README.html"
 pandoc "$ROOT_DIR/README.md" -o "$MARKDOWN_OUTPUT_DIR/README.pdf" --pdf-engine=wkhtmltopdf
 
 echo "Converting PDF documents to Markdown with embedded page figures..."
+converted_pdfs=()
 for pdf_file in "$ROOT_DIR"/docs/*.pdf; do
   [ -e "$pdf_file" ] || continue
   pdf_basename="$(basename "$pdf_file")"
@@ -76,21 +84,46 @@ for pdf_file in "$ROOT_DIR"/docs/*.pdf; do
   fi
 
   rm -rf "$tmp_dir"
+
+  converted_pdfs+=("$pdf_basename|$safe_name")
 done
 
-if compgen -G "$PLANTUML_OUTPUT_DIR"/*.svg > /dev/null; then
-  plantuml_index="$MARKDOWN_OUTPUT_DIR/plantuml_diagrams.md"
-  {
-    echo "# Generated PlantUML Diagrams"
-    echo ""
-  } > "$plantuml_index"
-  for diagram in "$PLANTUML_OUTPUT_DIR"/*.svg; do
-    diagram_base="$(basename "$diagram" .svg)"
-    echo "## $diagram_base" >> "$plantuml_index"
-    echo "" >> "$plantuml_index"
-    echo "![${diagram_base}](../plantuml/${diagram_base}.svg)" >> "$plantuml_index"
-    echo "" >> "$plantuml_index"
-  done
-fi
+index_file="$MARKDOWN_OUTPUT_DIR/index.md"
+{
+  echo "# Documentation Bundle"
+  echo ""
+
+  echo "## Project Overview"
+  echo ""
+  echo "- [README (HTML)](README.html)"
+  echo "- [README (PDF)](README.pdf)"
+  echo ""
+
+  echo "## Converted PDF References"
+  echo ""
+  if [ "${#converted_pdfs[@]}" -eq 0 ]; then
+    echo "No PDF sources were found under docs/."
+  else
+    for entry in "${converted_pdfs[@]}"; do
+      pdf_basename="${entry%%|*}"
+      safe_name="${entry##*|}"
+      echo "- [${pdf_basename}](pdfs/${safe_name}.md)"
+    done
+  fi
+
+  echo ""
+  echo "## PlantUML Diagrams"
+  echo ""
+  if [ "${#generated_diagrams[@]}" -eq 0 ]; then
+    echo "No PlantUML diagrams were rendered."
+  else
+    for diagram_base in "${generated_diagrams[@]}"; do
+      echo "### ${diagram_base}"
+      echo ""
+      echo "![${diagram_base}](../plantuml/${diagram_base}.svg)"
+      echo ""
+    done
+  fi
+} > "$index_file"
 
 echo "Documentation generated under $DOCS_DIR."
