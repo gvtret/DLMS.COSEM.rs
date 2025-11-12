@@ -18,6 +18,7 @@ pub enum ClientError<E> {
     AssociationRejected { result: u8, diagnostic: u8 },
     NegotiationFailed(&'static str),
     ReleaseRejected(u8),
+    AssociationNotEstablished,
 }
 
 impl<E> From<DlmsError> for ClientError<E> {
@@ -165,6 +166,9 @@ impl<T: Transport> Client<T> {
         &mut self,
         request: GetRequest,
     ) -> Result<GetResponse, ClientError<T::Error>> {
+        if self.negotiated_parameters.is_none() {
+            return Err(ClientError::AssociationNotEstablished);
+        }
         let request_bytes = request.to_bytes()?;
 
         let hdlc_frame = HdlcFrame {
@@ -185,6 +189,9 @@ impl<T: Transport> Client<T> {
         &mut self,
         request: SetRequest,
     ) -> Result<SetResponse, ClientError<T::Error>> {
+        if self.negotiated_parameters.is_none() {
+            return Err(ClientError::AssociationNotEstablished);
+        }
         let request_bytes = request.to_bytes()?;
 
         let hdlc_frame = HdlcFrame {
@@ -205,6 +212,9 @@ impl<T: Transport> Client<T> {
         &mut self,
         request: ActionRequest,
     ) -> Result<ActionResponse, ClientError<T::Error>> {
+        if self.negotiated_parameters.is_none() {
+            return Err(ClientError::AssociationNotEstablished);
+        }
         let request_bytes = request.to_bytes()?;
 
         let hdlc_frame = HdlcFrame {
@@ -222,6 +232,9 @@ impl<T: Transport> Client<T> {
     }
 
     pub fn release(&mut self) -> Result<(), ClientError<T::Error>> {
+        if self.negotiated_parameters.is_none() {
+            return Err(ClientError::AssociationNotEstablished);
+        }
         let release_req = ArlrqApdu {
             reason: Some(0),
             user_information: None,

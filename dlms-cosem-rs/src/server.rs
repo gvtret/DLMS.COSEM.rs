@@ -210,56 +210,112 @@ impl<T: Transport> Server<T> {
                 return Err(ServerError::DlmsError(DlmsError::Xdlms));
             };
 
-            let Some(object) = self
-                .objects
-                .get_mut(&get_req.cosem_attribute_descriptor.instance_id)
-            else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
+            if !self
+                .active_associations
+                .contains_key(&request_frame.address)
+            {
+                let denial = GetResponse::Normal(GetResponseNormal {
+                    invoke_id_and_priority: get_req.invoke_id_and_priority,
+                    result: GetDataResult::DataAccessResult(DataAccessResult::ReadWriteDenied),
+                });
+                denial.to_bytes()?
+            } else {
+                let Some(object) = self
+                    .objects
+                    .get_mut(&get_req.cosem_attribute_descriptor.instance_id)
+                else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
 
-            let result = object.get_attribute(get_req.cosem_attribute_descriptor.attribute_id);
-            let get_res = GetResponse::Normal(GetResponseNormal {
-                invoke_id_and_priority: get_req.invoke_id_and_priority,
-                result: result.map_or(
-                    GetDataResult::DataAccessResult(DataAccessResult::ObjectUnavailable),
-                    GetDataResult::Data,
-                ),
-            });
-            get_res.to_bytes()?
+                let result = object.get_attribute(get_req.cosem_attribute_descriptor.attribute_id);
+                let get_res = GetResponse::Normal(GetResponseNormal {
+                    invoke_id_and_priority: get_req.invoke_id_and_priority,
+                    result: result.map_or(
+                        GetDataResult::DataAccessResult(DataAccessResult::ObjectUnavailable),
+                        GetDataResult::Data,
+                    ),
+                });
+                get_res.to_bytes()?
+            }
         } else if let Ok(set_req) = SetRequest::from_bytes(&request_frame.information) {
             let SetRequest::Normal(set_req) = set_req else {
                 return Err(ServerError::DlmsError(DlmsError::Xdlms));
             };
 
-            let Some(object) = self
-                .objects
-                .get_mut(&set_req.cosem_attribute_descriptor.instance_id)
-            else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
+            if !self
+                .active_associations
+                .contains_key(&request_frame.address)
+            {
+                let denial = SetResponse::Normal(SetResponseNormal {
+                    invoke_id_and_priority: set_req.invoke_id_and_priority,
+                    result: DataAccessResult::ReadWriteDenied,
+                });
+                denial.to_bytes()?
+            } else {
+                let Some(object) = self
+                    .objects
+                    .get_mut(&set_req.cosem_attribute_descriptor.instance_id)
+                else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
 
-            let result = object.set_attribute(
-                set_req.cosem_attribute_descriptor.attribute_id,
-                set_req.value,
-            );
-            let set_res = SetResponse::Normal(SetResponseNormal {
-                invoke_id_and_priority: set_req.invoke_id_and_priority,
-                result: result.map_or(DataAccessResult::ObjectUnavailable, |_| {
-                    DataAccessResult::Success
-                }),
-            });
-            set_res.to_bytes()?
+                let result = object.set_attribute(
+                    set_req.cosem_attribute_descriptor.attribute_id,
+                    set_req.value,
+                );
+                let set_res = SetResponse::Normal(SetResponseNormal {
+                    invoke_id_and_priority: set_req.invoke_id_and_priority,
+                    result: result.map_or(DataAccessResult::ObjectUnavailable, |_| {
+                        DataAccessResult::Success
+                    }),
+                });
+                set_res.to_bytes()?
+            }
         } else if let Ok(action_req) = ActionRequest::from_bytes(&request_frame.information) {
             let ActionRequest::Normal(action_req) = action_req else {
                 return Err(ServerError::DlmsError(DlmsError::Xdlms));
             };
 
-            let Some(object) = self
-                .objects
-                .get_mut(&action_req.cosem_method_descriptor.instance_id)
-            else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
+            if !self
+                .active_associations
+                .contains_key(&request_frame.address)
+            {
+                let denial = ActionResponse::Normal(ActionResponseNormal {
+                    invoke_id_and_priority: action_req.invoke_id_and_priority,
+                    single_response: crate::xdlms::ActionResponseWithOptionalData {
+                        result: ActionResult::ReadWriteDenied,
+                        return_parameters: None,
+                    },
+                });
+                denial.to_bytes()?
+            } else {
+                let Some(object) = self
+                    .objects
+                    .get_mut(&action_req.cosem_method_descriptor.instance_id)
+                else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let result = object.invoke_method(
+                    action_req.cosem_method_descriptor.method_id,
+                    action_req
+                        .method_invocation_parameters
+                        .unwrap_or(crate::types::CosemData::NullData),
+                );
+                let action_res = ActionResponse::Normal(ActionResponseNormal {
+                    invoke_id_and_priority: action_req.invoke_id_and_priority,
+                    single_response: crate::xdlms::ActionResponseWithOptionalData {
+                        result: result
+                            .as_ref()
+                            .map_or(ActionResult::ObjectUnavailable, |_| ActionResult::Success),
+                        return_parameters: result.map(GetDataResult::Data),
+                    },
+                });
+                action_res.to_bytes()?
+            }
+        } else {
+            return Err(ServerError::DlmsError(DlmsError::Xdlms));
+        };
 
         let response_hdlc_frame = HdlcFrame {
             address: self.address,
@@ -348,7 +404,13 @@ impl InitiateValidationError {
 mod tests {
     extern crate std;
     use super::*;
-    use crate::xdlms::{AssociationParameters, Conformance, InitiateRequest, InitiateResponse};
+    use crate::cosem::{CosemAttributeDescriptor, CosemMethodDescriptor};
+    use crate::types::CosemData;
+    use crate::xdlms::{
+        ActionRequest, ActionRequestNormal, ActionResponse, ActionResult, AssociationParameters,
+        Conformance, DataAccessResult, GetDataResult, GetRequest, GetRequestNormal, GetResponse,
+        InitiateRequest, InitiateResponse, SetRequest, SetRequestNormal, SetResponse,
+    };
 
     struct DummyTransport;
 
@@ -687,6 +749,122 @@ mod tests {
         assert_eq!(aare.result, 1);
         assert_eq!(aare.result_source_diagnostic, 3);
         assert!(!server.active_associations.contains_key(&0x0002));
+    }
+
+    #[test]
+    fn get_request_without_active_association_is_denied() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let request = GetRequest::Normal(GetRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 1,
+                instance_id: [0, 0, 0, 0, 0, 1],
+                attribute_id: 2,
+            },
+            access_selection: None,
+        });
+
+        let frame = HdlcFrame {
+            address: 0x0002,
+            control: 0,
+            information: request.to_bytes().expect("failed to encode get request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle get request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            GetResponse::from_bytes(&response_frame.information).expect("failed to decode get");
+
+        let GetResponse::Normal(response) = response else {
+            panic!("expected normal get response");
+        };
+
+        assert_eq!(
+            response.result,
+            GetDataResult::DataAccessResult(DataAccessResult::ReadWriteDenied)
+        );
+    }
+
+    #[test]
+    fn set_request_without_active_association_is_denied() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let request = SetRequest::Normal(SetRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 1,
+                instance_id: [0, 0, 0, 0, 0, 1],
+                attribute_id: 2,
+            },
+            access_selection: None,
+            value: CosemData::NullData,
+        });
+
+        let frame = HdlcFrame {
+            address: 0x0002,
+            control: 0,
+            information: request.to_bytes().expect("failed to encode set request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle set request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            SetResponse::from_bytes(&response_frame.information).expect("failed to decode set");
+
+        let SetResponse::Normal(response) = response else {
+            panic!("expected normal set response");
+        };
+
+        assert_eq!(response.result, DataAccessResult::ReadWriteDenied);
+    }
+
+    #[test]
+    fn action_request_without_active_association_is_denied() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let request = ActionRequest::Normal(ActionRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_method_descriptor: CosemMethodDescriptor {
+                class_id: 1,
+                instance_id: [0, 0, 0, 0, 0, 1],
+                method_id: 1,
+            },
+            method_invocation_parameters: None,
+        });
+
+        let frame = HdlcFrame {
+            address: 0x0002,
+            control: 0,
+            information: request.to_bytes().expect("failed to encode action request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle action request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response = ActionResponse::from_bytes(&response_frame.information)
+            .expect("failed to decode action response");
+
+        let ActionResponse::Normal(response) = response else {
+            panic!("expected normal action response");
+        };
+
+        assert_eq!(
+            response.single_response.result,
+            ActionResult::ReadWriteDenied
+        );
+        assert!(response.single_response.return_parameters.is_none());
     }
 
     #[test]
