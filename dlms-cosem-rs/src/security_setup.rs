@@ -1,22 +1,23 @@
 use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
 use crate::types::Data as CosemData;
+use std::vec::Vec;
 
 #[derive(Debug)]
 pub struct SecuritySetup {
-    security_policy: CosemData,
-    security_suite: CosemData,
-    client_system_title: CosemData,
-    server_system_title: CosemData,
+    security_policy: u8,
+    security_suite: u8,
+    client_system_title: Vec<u8>,
+    server_system_title: Vec<u8>,
 }
 
 impl SecuritySetup {
     pub fn new() -> Self {
         Self {
-            security_policy: CosemData::NullData,
-            security_suite: CosemData::NullData,
-            client_system_title: CosemData::NullData,
-            server_system_title: CosemData::NullData,
+            security_policy: 0,
+            security_suite: 0,
+            client_system_title: Vec::new(),
+            server_system_title: Vec::new(),
         }
     }
 }
@@ -34,10 +35,10 @@ impl CosemObject for SecuritySetup {
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {
         match attribute_id {
-            2 => Some(self.security_policy.clone()),
-            3 => Some(self.security_suite.clone()),
-            4 => Some(self.client_system_title.clone()),
-            5 => Some(self.server_system_title.clone()),
+            2 => Some(CosemData::Unsigned(self.security_policy)),
+            3 => Some(CosemData::Unsigned(self.security_suite)),
+            4 => Some(CosemData::OctetString(self.client_system_title.clone())),
+            5 => Some(CosemData::OctetString(self.server_system_title.clone())),
             _ => None,
         }
     }
@@ -49,20 +50,36 @@ impl CosemObject for SecuritySetup {
     ) -> Option<()> {
         match attribute_id {
             2 => {
-                self.security_policy = data;
-                Some(())
+                if let CosemData::Unsigned(policy) = data {
+                    self.security_policy = policy;
+                    Some(())
+                } else {
+                    None
+                }
             }
             3 => {
-                self.security_suite = data;
-                Some(())
+                if let CosemData::Unsigned(suite) = data {
+                    self.security_suite = suite;
+                    Some(())
+                } else {
+                    None
+                }
             }
             4 => {
-                self.client_system_title = data;
-                Some(())
+                if let CosemData::OctetString(title) = data {
+                    self.client_system_title = title;
+                    Some(())
+                } else {
+                    None
+                }
             }
             5 => {
-                self.server_system_title = data;
-                Some(())
+                if let CosemData::OctetString(title) = data {
+                    self.server_system_title = title;
+                    Some(())
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -85,9 +102,44 @@ mod tests {
     #[test]
     fn test_security_setup_new() {
         let setup = SecuritySetup::new();
-        assert_eq!(setup.get_attribute(2), Some(CosemData::NullData));
-        assert_eq!(setup.get_attribute(3), Some(CosemData::NullData));
-        assert_eq!(setup.get_attribute(4), Some(CosemData::NullData));
-        assert_eq!(setup.get_attribute(5), Some(CosemData::NullData));
+        assert_eq!(setup.get_attribute(2), Some(CosemData::Unsigned(0)));
+        assert_eq!(setup.get_attribute(3), Some(CosemData::Unsigned(0)));
+        assert_eq!(
+            setup.get_attribute(4),
+            Some(CosemData::OctetString(Vec::new()))
+        );
+        assert_eq!(
+            setup.get_attribute(5),
+            Some(CosemData::OctetString(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn test_security_setup_set_get() {
+        let mut setup = SecuritySetup::new();
+
+        setup.set_attribute(2, CosemData::Unsigned(1)).unwrap();
+        assert_eq!(setup.get_attribute(2), Some(CosemData::Unsigned(1)));
+
+        setup.set_attribute(3, CosemData::Unsigned(2)).unwrap();
+        assert_eq!(setup.get_attribute(3), Some(CosemData::Unsigned(2)));
+
+        let client_title = b"client".to_vec();
+        setup
+            .set_attribute(4, CosemData::OctetString(client_title.clone()))
+            .unwrap();
+        assert_eq!(
+            setup.get_attribute(4),
+            Some(CosemData::OctetString(client_title))
+        );
+
+        let server_title = b"server".to_vec();
+        setup
+            .set_attribute(5, CosemData::OctetString(server_title.clone()))
+            .unwrap();
+        assert_eq!(
+            setup.get_attribute(5),
+            Some(CosemData::OctetString(server_title))
+        );
     }
 }

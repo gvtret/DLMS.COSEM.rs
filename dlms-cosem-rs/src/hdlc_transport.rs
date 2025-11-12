@@ -2,13 +2,12 @@
 
 use crate::hdlc::HDLC_FLAG;
 use crate::transport::Transport;
-use heapless::Vec;
 use std::io::{Read, Write};
+use std::vec::Vec;
 
 #[derive(Debug)]
 pub enum HdlcTransportError {
     Io(std::io::Error),
-    VecIsFull,
 }
 
 impl From<std::io::Error> for HdlcTransportError {
@@ -35,7 +34,7 @@ impl<T: Read + Write> Transport for HdlcTransport<T> {
         Ok(())
     }
 
-    fn receive(&mut self) -> Result<Vec<u8, 2048>, Self::Error> {
+    fn receive(&mut self) -> Result<Vec<u8>, Self::Error> {
         let mut buffer = Vec::new();
         let mut byte_buffer = [0u8; 1];
         let mut in_frame = false;
@@ -47,9 +46,7 @@ impl<T: Read + Write> Transport for HdlcTransport<T> {
             if byte == HDLC_FLAG {
                 if in_frame {
                     if buffer.len() >= 2 {
-                        buffer
-                            .push(HDLC_FLAG)
-                            .map_err(|_| HdlcTransportError::VecIsFull)?;
+                        buffer.push(HDLC_FLAG);
                         return Ok(buffer);
                     } else {
                         buffer.clear();
@@ -57,14 +54,10 @@ impl<T: Read + Write> Transport for HdlcTransport<T> {
                     }
                 } else {
                     in_frame = true;
-                    buffer
-                        .push(HDLC_FLAG)
-                        .map_err(|_| HdlcTransportError::VecIsFull)?;
+                    buffer.push(HDLC_FLAG);
                 }
             } else if in_frame {
-                buffer
-                    .push(byte)
-                    .map_err(|_| HdlcTransportError::VecIsFull)?;
+                buffer.push(byte);
             }
         }
     }

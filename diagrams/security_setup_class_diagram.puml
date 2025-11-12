@@ -1,0 +1,21 @@
+@startuml
+!theme vibrant
+
+class SecuritySetup {
+  - security_policy: u8
+  - security_suite: u8
+  - client_system_title: Vec<u8>
+  - server_system_title: Vec<u8>
+  + new()
+}
+
+interface CosemObject {
+  + class_id()
+  + get_attribute()
+  + set_attribute()
+  + invoke_method()
+}
+
+SecuritySetup ..|> CosemObject
+
+@enduml

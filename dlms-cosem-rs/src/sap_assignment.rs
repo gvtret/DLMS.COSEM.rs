@@ -1,11 +1,11 @@
 use crate::cosem_object::CosemObject;
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
 use crate::types::Data as CosemData;
-use heapless::Vec;
+use std::vec::Vec;
 
 #[derive(Debug)]
 pub struct SapAssignment {
-    pub logical_device_name_list: Vec<u8, 2048>,
+    pub logical_device_name_list: Vec<u8>,
 }
 
 impl CosemObject for SapAssignment {
@@ -15,12 +15,7 @@ impl CosemObject for SapAssignment {
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {
         match attribute_id {
-            2 => {
-                let mut vec = heapless::Vec::new();
-                vec.extend_from_slice(&self.logical_device_name_list)
-                    .unwrap();
-                Some(CosemData::OctetString(vec))
-            }
+            2 => Some(CosemData::OctetString(self.logical_device_name_list.clone())),
             _ => None,
         }
     }

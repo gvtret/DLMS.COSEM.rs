@@ -4,7 +4,7 @@ use crate::hdlc::HdlcFrame;
 use crate::security::{lls_authenticate, hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
 use crate::xdlms::{GetRequest, GetResponse, SetRequest, SetResponse, ActionRequest, ActionResponse};
-use heapless::Vec;
+use std::vec::Vec;
 
 #[derive(Debug)]
 pub enum ClientError<E> {
@@ -29,16 +29,16 @@ impl<E> From<SecurityError> for ClientError<E> {
 pub struct Client<T: Transport> {
     address: u16,
     transport: T,
-    password: Option<Vec<u8, 32>>,
-    key: Option<Vec<u8, 16>>,
+    password: Option<Vec<u8>>,
+    key: Option<Vec<u8>>,
 }
 
 impl<T: Transport> Client<T> {
     pub fn new(
         address: u16,
         transport: T,
-        password: Option<Vec<u8, 32>>,
-        key: Option<Vec<u8, 16>>,
+        password: Option<Vec<u8>>,
+        key: Option<Vec<u8>>,
     ) -> Self {
         Client {
             address,
@@ -50,17 +50,14 @@ impl<T: Transport> Client<T> {
 
     pub fn associate(&mut self) -> Result<AareApdu, ClientError<T::Error>> {
         let mut aarq = AarqApdu {
-            application_context_name: Vec::new(),
+            application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
             sender_acse_requirements: 0,
             mechanism_name: None,
             calling_authentication_value: None,
             user_information: Vec::new(),
         };
-        aarq.application_context_name
-            .extend_from_slice(b"LN_WITH_NO_CIPHERING")
-            .map_err(|_| DlmsError::VecIsFull)?;
         if self.password.is_some() {
-            aarq.mechanism_name = Some(Vec::from_slice(b"LLS").map_err(|_| DlmsError::VecIsFull)?);
+            aarq.mechanism_name = Some(b"LLS".to_vec());
         }
 
         let request_bytes = aarq.to_bytes()?;
@@ -82,16 +79,13 @@ impl<T: Transport> Client<T> {
             (&self.password, aare.responding_authentication_value.as_ref())
         {
             let response = lls_authenticate(password, challenge)?;
-            let mut aarq = AarqApdu {
-                application_context_name: Vec::new(),
+            let aarq = AarqApdu {
+                application_context_name: b"LN_WITH_NO_CIPHERING".to_vec(),
                 sender_acse_requirements: 0,
-                mechanism_name: Some(Vec::from_slice(b"LLS").map_err(|_| DlmsError::VecIsFull)?),
+                mechanism_name: Some(b"LLS".to_vec()),
                 calling_authentication_value: Some(response),
                 user_information: Vec::new(),
             };
-            aarq.application_context_name
-                .extend_from_slice(b"LN_WITH_NO_CIPHERING")
-                .map_err(|_| DlmsError::VecIsFull)?;
 
             let request_bytes = aarq.to_bytes()?;
             let hdlc_frame = HdlcFrame {
@@ -174,7 +168,7 @@ impl<T: Transport> Client<T> {
     fn send_and_receive(
         &mut self,
         data: &[u8],
-    ) -> Result<Vec<u8, 2048>, ClientError<T::Error>> {
+    ) -> Result<Vec<u8>, ClientError<T::Error>> {
         if let Some(key) = &self.key {
             let encrypted_data = hls_encrypt(data, key)?;
             self.transport
