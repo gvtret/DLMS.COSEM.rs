@@ -1,4 +1,3 @@
-
 use aead::{Aead, AeadCore, KeyInit, OsRng};
 use aes_gcm::{Aes128Gcm, Error, Nonce};
 use hmac::{Hmac, Mac};
@@ -21,8 +20,8 @@ impl From<Error> for SecurityError {
 type HmacSha256 = Hmac<Sha256>;
 
 pub fn lls_authenticate(password: &[u8], challenge: &[u8]) -> Result<Vec<u8>, SecurityError> {
-    let mut mac =
-        <HmacSha256 as Mac>::new_from_slice(password).map_err(|_| SecurityError::InvalidKeyLength)?;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(password)
+        .map_err(|_| SecurityError::InvalidKeyLength)?;
     mac.update(challenge);
     let result = mac.finalize();
     let code_bytes = result.into_bytes();
