@@ -1,11 +1,23 @@
 use crate::error::DlmsError;
+use nom::bytes::complete::{tag, take};
+use nom::{IResult, Parser};
 use std::vec::Vec;
-use nom::{
-    bytes::complete::{tag, take},
-    combinator::opt,
-    IResult,
-    Parser,
-};
+
+fn parse_optional(input: &[u8], tag_byte: u8) -> IResult<&[u8], Option<&[u8]>> {
+    if let Some(&first) = input.first() {
+        if first == tag_byte {
+            let (input, _) = tag(&[tag_byte][..]).parse(input)?;
+            let (input, len_bytes) = take(1usize)(input)?;
+            let length = len_bytes[0] as usize;
+            let (input, value) = take(length)(input)?;
+            Ok((input, Some(value)))
+        } else {
+            Ok((input, None))
+        }
+    } else {
+        Ok((input, None))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AarqApdu {
@@ -60,8 +72,8 @@ impl AarqApdu {
         let (content, _sar_tag) = tag(&[0x8Au8][..]).parse(content)?;
         let (content, _sar_len) = take(1usize)(content)?;
         let (content, sar) = take(1usize)(content)?;
-        let (content, mn) = opt((tag(&[0x8Bu8][..]), take(1usize), take(1usize))).parse(content)?;
-        let (content, cav) = opt((tag(&[0xACu8][..]), take(1usize), take(1usize))).parse(content)?;
+        let (content, mn) = parse_optional(content, 0x8B)?;
+        let (content, cav) = parse_optional(content, 0xAC)?;
         let (content, _ui_tag) = tag(&[0xBEu8][..]).parse(content)?;
         let (content, ui_len) = take(1usize)(content)?;
         let (_content, ui) = take(ui_len[0] as usize)(content)?;
@@ -74,15 +86,11 @@ impl AarqApdu {
             user_information: ui.to_vec(),
         };
 
-        if let Some((_, mn_len, mn_val)) = mn {
-            let len = u8::from_be_bytes(mn_len[0].to_be_bytes());
-            let (mn_val, _) = take(len as usize)(mn_val)?;
+        if let Some(mn_val) = mn {
             aarq.mechanism_name = Some(mn_val.to_vec());
         }
 
-        if let Some((_, cav_len, cav_val)) = cav {
-            let len = u8::from_be_bytes(cav_len[0].to_be_bytes());
-            let (cav_val, _) = take(len as usize)(cav_val)?;
+        if let Some(cav_val) = cav {
             aarq.calling_authentication_value = Some(cav_val.to_vec());
         }
 
@@ -143,7 +151,7 @@ impl AareApdu {
         let (content, _rsd_tag) = tag(&[0xA3u8][..]).parse(content)?;
         let (content, _rsd_len) = take(1usize)(content)?;
         let (content, rsd) = take(1usize)(content)?;
-        let (content, rav) = opt((tag(&[0xACu8][..]), take(1usize), take(1usize))).parse(content)?;
+        let (content, rav) = parse_optional(content, 0xAC)?;
         let (content, _ui_tag) = tag(&[0xBEu8][..]).parse(content)?;
         let (content, ui_len) = take(1usize)(content)?;
         let (_content, ui) = take(ui_len[0] as usize)(content)?;
@@ -156,9 +164,7 @@ impl AareApdu {
             user_information: ui.to_vec(),
         };
 
-        if let Some((_, rav_len, rav_val)) = rav {
-            let len = u8::from_be_bytes(rav_len[0].to_be_bytes());
-            let (rav_val, _) = take(len as usize)(rav_val)?;
+        if let Some(rav_val) = rav {
             aare.responding_authentication_value = Some(rav_val.to_vec());
         }
 
