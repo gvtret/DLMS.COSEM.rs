@@ -6,9 +6,9 @@ use crate::security::lls_authenticate;
 use crate::security::{hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
 use crate::xdlms::{
-    ActionRequest, ActionResponse, ActionResponseNormal, ActionResult, DataAccessResult,
-    GetDataResult, GetRequest, GetResponse, GetResponseNormal, SetRequest, SetResponse,
-    SetResponseNormal,
+    ActionRequest, ActionResponse, ActionResponseNormal, ActionResult, AssociationParameters,
+    DataAccessResult, GetDataResult, GetRequest, GetResponse, GetResponseNormal, InitiateRequest,
+    InitiateResponse, SetRequest, SetResponse, SetResponseNormal,
 };
 use rand_core::{OsRng, RngCore};
 use std::boxed::Box;
@@ -43,6 +43,7 @@ pub struct Server<T: Transport> {
     key: Option<Vec<u8>>,
     objects: BTreeMap<[u8; 6], Box<dyn CosemObject>>,
     lls_challenges: BTreeMap<u16, Vec<u8>>,
+    association_parameters: AssociationParameters,
 }
 
 impl<T: Transport> Server<T> {
@@ -59,7 +60,12 @@ impl<T: Transport> Server<T> {
             key,
             objects: BTreeMap::new(),
             lls_challenges: BTreeMap::new(),
+            association_parameters: AssociationParameters::default(),
         }
+    }
+
+    pub fn set_association_parameters(&mut self, params: AssociationParameters) {
+        self.association_parameters = params;
     }
 
     pub fn register_object(&mut self, instance_id: [u8; 6], object: Box<dyn CosemObject>) {
@@ -92,121 +98,147 @@ impl<T: Transport> Server<T> {
     fn handle_request(&mut self, request_bytes: &[u8]) -> Result<Vec<u8>, ServerError<T::Error>> {
         let request_frame = HdlcFrame::from_bytes(request_bytes)?;
 
-        let response_bytes = if let Ok(aarq) = AarqApdu::from_bytes(&request_frame.information) {
-            let mut aare = AareApdu {
-                application_context_name: aarq.1.application_context_name.clone(),
-                result: 0,
-                result_source_diagnostic: 0,
-                responding_authentication_value: None,
-                user_information: Vec::new(),
-            };
-            if let (Some(password), Some(mechanism_name)) =
-                (&self.password, aarq.1.mechanism_name.as_ref())
-            {
-                let association_address = request_frame.address;
-                if mechanism_name == b"LLS" {
-                    if let Some(auth_value) = aarq.1.calling_authentication_value {
-                        if let Some(challenge) = self.lls_challenges.get(&association_address) {
-                            match lls_authenticate(password, challenge) {
-                                Ok(expected_response) => {
-                                    if auth_value == expected_response {
-                                        aare.result = 0; // success
-                                        self.lls_challenges.remove(&association_address);
-                                    } else {
-                                        aare.result = 1; // failure
-                                    }
-                                }
-                                Err(_) => aare.result = 1, // failure
-                            }
-                        } else {
-                            aare.result = 1; // failure due to missing challenge
-                        }
-                    } else {
-                        let mut challenge = vec![0u8; 16];
-                        OsRng.fill_bytes(&mut challenge);
-                        self.lls_challenges
-                            .insert(association_address, challenge.clone());
-                        aare.responding_authentication_value = Some(challenge);
+        let response_bytes =
+            if let Ok((_, aarq_apdu)) = AarqApdu::from_bytes(&request_frame.information) {
+                let initiate_request =
+                    InitiateRequest::from_user_information(&aarq_apdu.user_information)?;
+                let negotiation = self.negotiate_initiate_response(&initiate_request);
+                let mut aare = AareApdu {
+                    application_context_name: aarq_apdu.application_context_name.clone(),
+                    result: 0,
+                    result_source_diagnostic: 0,
+                    responding_authentication_value: None,
+                    user_information: Vec::new(),
+                };
+
+                match negotiation {
+                    Ok(initiate_response) => {
+                        aare.user_information = initiate_response.to_user_information()?;
+                    }
+                    Err(err) => {
+                        aare.result = 1;
+                        aare.result_source_diagnostic = err.diagnostic();
+                        aare.user_information = self
+                            .association_parameters
+                            .to_initiate_response(self.association_parameters.conformance.clone())
+                            .to_user_information()?;
                     }
                 }
-            }
-            aare.user_information.extend_from_slice(b"user_info");
-            aare.to_bytes()?
-        } else if let Ok(get_req) = GetRequest::from_bytes(&request_frame.information) {
-            let GetRequest::Normal(get_req) = get_req else {
+
+                if aare.result != 0 {
+                    return Ok(HdlcFrame {
+                        address: self.address,
+                        control: 0,
+                        information: aare.to_bytes()?,
+                    }
+                    .to_bytes()?);
+                }
+                if let (Some(password), Some(mechanism_name)) =
+                    (&self.password, aarq_apdu.mechanism_name.as_ref())
+                {
+                    let association_address = request_frame.address;
+                    if mechanism_name == b"LLS" {
+                        if let Some(auth_value) = aarq_apdu.calling_authentication_value.clone() {
+                            if let Some(challenge) = self.lls_challenges.get(&association_address) {
+                                match lls_authenticate(password, challenge) {
+                                    Ok(expected_response) => {
+                                        if auth_value == expected_response {
+                                            aare.result = 0; // success
+                                            self.lls_challenges.remove(&association_address);
+                                        } else {
+                                            aare.result = 1; // failure
+                                        }
+                                    }
+                                    Err(_) => aare.result = 1, // failure
+                                }
+                            } else {
+                                aare.result = 1; // failure due to missing challenge
+                            }
+                        } else {
+                            let mut challenge = vec![0u8; 16];
+                            OsRng.fill_bytes(&mut challenge);
+                            self.lls_challenges
+                                .insert(association_address, challenge.clone());
+                            aare.responding_authentication_value = Some(challenge);
+                        }
+                    }
+                }
+                aare.to_bytes()?
+            } else if let Ok(get_req) = GetRequest::from_bytes(&request_frame.information) {
+                let GetRequest::Normal(get_req) = get_req else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let Some(object) = self
+                    .objects
+                    .get_mut(&get_req.cosem_attribute_descriptor.instance_id)
+                else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let result = object.get_attribute(get_req.cosem_attribute_descriptor.attribute_id);
+                let get_res = GetResponse::Normal(GetResponseNormal {
+                    invoke_id_and_priority: get_req.invoke_id_and_priority,
+                    result: result.map_or(
+                        GetDataResult::DataAccessResult(DataAccessResult::ObjectUnavailable),
+                        GetDataResult::Data,
+                    ),
+                });
+                get_res.to_bytes()?
+            } else if let Ok(set_req) = SetRequest::from_bytes(&request_frame.information) {
+                let SetRequest::Normal(set_req) = set_req else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let Some(object) = self
+                    .objects
+                    .get_mut(&set_req.cosem_attribute_descriptor.instance_id)
+                else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let result = object.set_attribute(
+                    set_req.cosem_attribute_descriptor.attribute_id,
+                    set_req.value,
+                );
+                let set_res = SetResponse::Normal(SetResponseNormal {
+                    invoke_id_and_priority: set_req.invoke_id_and_priority,
+                    result: result.map_or(DataAccessResult::ObjectUnavailable, |_| {
+                        DataAccessResult::Success
+                    }),
+                });
+                set_res.to_bytes()?
+            } else if let Ok(action_req) = ActionRequest::from_bytes(&request_frame.information) {
+                let ActionRequest::Normal(action_req) = action_req else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let Some(object) = self
+                    .objects
+                    .get_mut(&action_req.cosem_method_descriptor.instance_id)
+                else {
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let result = object.invoke_method(
+                    action_req.cosem_method_descriptor.method_id,
+                    action_req
+                        .method_invocation_parameters
+                        .unwrap_or(crate::types::CosemData::NullData),
+                );
+                let action_res = ActionResponse::Normal(ActionResponseNormal {
+                    invoke_id_and_priority: action_req.invoke_id_and_priority,
+                    single_response: crate::xdlms::ActionResponseWithOptionalData {
+                        result: result
+                            .as_ref()
+                            .map_or(ActionResult::ObjectUnavailable, |_| ActionResult::Success),
+                        return_parameters: result.map(GetDataResult::Data),
+                    },
+                });
+                action_res.to_bytes()?
+            } else {
                 return Err(ServerError::DlmsError(DlmsError::Xdlms));
             };
-
-            let Some(object) = self
-                .objects
-                .get_mut(&get_req.cosem_attribute_descriptor.instance_id)
-            else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
-
-            let result = object.get_attribute(get_req.cosem_attribute_descriptor.attribute_id);
-            let get_res = GetResponse::Normal(GetResponseNormal {
-                invoke_id_and_priority: get_req.invoke_id_and_priority,
-                result: result.map_or(
-                    GetDataResult::DataAccessResult(DataAccessResult::ObjectUnavailable),
-                    GetDataResult::Data,
-                ),
-            });
-            get_res.to_bytes()?
-        } else if let Ok(set_req) = SetRequest::from_bytes(&request_frame.information) {
-            let SetRequest::Normal(set_req) = set_req else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
-
-            let Some(object) = self
-                .objects
-                .get_mut(&set_req.cosem_attribute_descriptor.instance_id)
-            else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
-
-            let result = object.set_attribute(
-                set_req.cosem_attribute_descriptor.attribute_id,
-                set_req.value,
-            );
-            let set_res = SetResponse::Normal(SetResponseNormal {
-                invoke_id_and_priority: set_req.invoke_id_and_priority,
-                result: result.map_or(DataAccessResult::ObjectUnavailable, |_| {
-                    DataAccessResult::Success
-                }),
-            });
-            set_res.to_bytes()?
-        } else if let Ok(action_req) = ActionRequest::from_bytes(&request_frame.information) {
-            let ActionRequest::Normal(action_req) = action_req else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
-
-            let Some(object) = self
-                .objects
-                .get_mut(&action_req.cosem_method_descriptor.instance_id)
-            else {
-                return Err(ServerError::DlmsError(DlmsError::Xdlms));
-            };
-
-            let result = object.invoke_method(
-                action_req.cosem_method_descriptor.method_id,
-                action_req
-                    .method_invocation_parameters
-                    .unwrap_or(crate::types::CosemData::NullData),
-            );
-            let action_res = ActionResponse::Normal(ActionResponseNormal {
-                invoke_id_and_priority: action_req.invoke_id_and_priority,
-                single_response: crate::xdlms::ActionResponseWithOptionalData {
-                    result: result
-                        .as_ref()
-                        .map_or(ActionResult::ObjectUnavailable, |_| ActionResult::Success),
-                    return_parameters: result.map(GetDataResult::Data),
-                },
-            });
-            action_res.to_bytes()?
-        } else {
-            return Err(ServerError::DlmsError(DlmsError::Xdlms));
-        };
 
         let response_hdlc_frame = HdlcFrame {
             address: self.address,
@@ -216,14 +248,69 @@ impl<T: Transport> Server<T> {
 
         Ok(response_hdlc_frame.to_bytes()?)
     }
+
+    fn negotiate_initiate_response(
+        &self,
+        request: &InitiateRequest,
+    ) -> Result<InitiateResponse, InitiateValidationError> {
+        if !request.response_allowed {
+            return Err(InitiateValidationError::ResponseNotAllowed);
+        }
+
+        if request.proposed_dlms_version_number != self.association_parameters.dlms_version {
+            return Err(InitiateValidationError::DlmsVersionMismatch);
+        }
+
+        if request.client_max_receive_pdu_size == 0 {
+            return Err(InitiateValidationError::InvalidClientPduSize);
+        }
+
+        let negotiated_conformance = self
+            .association_parameters
+            .conformance
+            .intersection(&request.proposed_conformance);
+
+        if negotiated_conformance.is_empty() {
+            return Err(InitiateValidationError::NoCommonConformance);
+        }
+
+        let mut response = self
+            .association_parameters
+            .to_initiate_response(negotiated_conformance);
+
+        if response.negotiated_quality_of_service.is_none() {
+            response.negotiated_quality_of_service = request.proposed_quality_of_service;
+        }
+
+        Ok(response)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InitiateValidationError {
+    ResponseNotAllowed,
+    DlmsVersionMismatch,
+    InvalidClientPduSize,
+    NoCommonConformance,
+}
+
+impl InitiateValidationError {
+    fn diagnostic(self) -> u8 {
+        match self {
+            InitiateValidationError::ResponseNotAllowed => 1,
+            InitiateValidationError::DlmsVersionMismatch => 2,
+            InitiateValidationError::InvalidClientPduSize => 3,
+            InitiateValidationError::NoCommonConformance => 4,
+        }
+    }
 }
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
     extern crate std;
     use super::*;
+    use crate::xdlms::{AssociationParameters, Conformance, InitiateRequest, InitiateResponse};
 
-    #[derive(Default)]
     struct DummyTransport;
 
     impl Transport for DummyTransport {
@@ -255,21 +342,23 @@ mod tests {
             .1
     }
 
+    fn default_initiate_request() -> InitiateRequest {
+        AssociationParameters::default().to_initiate_request()
+    }
+
     #[test]
     fn lls_challenge_is_issued_and_persisted() {
-        let mut server = Server::new(
-            0x0001,
-            DummyTransport::default(),
-            Some(b"password".to_vec()),
-            None,
-        );
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
+        let user_information = default_initiate_request()
+            .to_user_information()
+            .expect("failed to encode initiate request");
         let aarq = AarqApdu {
             application_context_name: b"CTX".to_vec(),
             sender_acse_requirements: 0,
             mechanism_name: Some(b"LLS".to_vec()),
             calling_authentication_value: None,
-            user_information: b"info".to_vec(),
+            user_information: user_information.clone(),
         };
         let aarq_bytes = aarq.to_bytes().expect("failed to encode aarq");
         assert!(AarqApdu::from_bytes(&aarq_bytes).is_ok());
@@ -287,6 +376,13 @@ mod tests {
             .responding_authentication_value
             .expect("expected challenge in response");
 
+        let initiate_response = InitiateResponse::from_user_information(&aare.user_information)
+            .expect("expected initiate response");
+        assert_eq!(initiate_response.negotiated_dlms_version_number, 6);
+        assert_eq!(initiate_response.server_max_receive_pdu_size, 0x0400);
+        assert_eq!(initiate_response.vaa_name, 0x0007);
+        assert_eq!(initiate_response.negotiated_conformance.value, 0x0010_0000);
+
         assert_eq!(challenge.len(), 16);
         let stored = server
             .lls_challenges
@@ -297,20 +393,18 @@ mod tests {
 
     #[test]
     fn lls_challenge_response_validates_and_clears() {
-        let mut server = Server::new(
-            0x0001,
-            DummyTransport::default(),
-            Some(b"password".to_vec()),
-            None,
-        );
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
 
         let association_address = 0x0003;
+        let user_information = default_initiate_request()
+            .to_user_information()
+            .expect("failed to encode initiate request");
         let aarq = AarqApdu {
             application_context_name: b"CTX".to_vec(),
             sender_acse_requirements: 0,
             mechanism_name: Some(b"LLS".to_vec()),
             calling_authentication_value: None,
-            user_information: b"info".to_vec(),
+            user_information: user_information.clone(),
         };
         let aarq_bytes = aarq.to_bytes().expect("failed to encode aarq");
         assert!(AarqApdu::from_bytes(&aarq_bytes).is_ok());
@@ -338,7 +432,7 @@ mod tests {
                 sender_acse_requirements: 0,
                 mechanism_name: Some(b"LLS".to_vec()),
                 calling_authentication_value: Some(expected_response.clone()),
-                user_information: b"info".to_vec(),
+                user_information: user_information.clone(),
             },
         );
 
@@ -349,6 +443,168 @@ mod tests {
 
         assert_eq!(aare.result, 0);
         assert!(aare.responding_authentication_value.is_none());
-        assert!(server.lls_challenges.get(&association_address).is_none());
+        let initiate_response = InitiateResponse::from_user_information(&aare.user_information)
+            .expect("expected initiate response");
+        assert_eq!(initiate_response.negotiated_dlms_version_number, 6);
+        assert_eq!(initiate_response.server_max_receive_pdu_size, 0x0400);
+        assert_eq!(initiate_response.negotiated_conformance.value, 0x0010_0000);
+        assert!(!server.lls_challenges.contains_key(&association_address));
+    }
+
+    #[test]
+    fn initiate_request_with_incompatible_version_is_rejected() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let mut request = default_initiate_request();
+        request.proposed_dlms_version_number = 7;
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: None,
+            calling_authentication_value: None,
+            user_information: request
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&build_hdlc_request(0x0002, aarq))
+            .expect("server failed to handle aarq");
+        let aare = parse_aare(&response_bytes);
+        assert_eq!(aare.result, 1);
+        assert_eq!(aare.result_source_diagnostic, 2);
+    }
+
+    #[test]
+    fn initiate_request_without_common_conformance_is_rejected() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let mut request = default_initiate_request();
+        request.proposed_conformance = Conformance { value: 0 };
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: None,
+            calling_authentication_value: None,
+            user_information: request
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&build_hdlc_request(0x0002, aarq))
+            .expect("server failed to handle aarq");
+        let aare = parse_aare(&response_bytes);
+        assert_eq!(aare.result, 1);
+        assert_eq!(aare.result_source_diagnostic, 4);
+    }
+
+    #[test]
+    fn initiate_request_without_response_allowed_is_rejected() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let mut request = default_initiate_request();
+        request.response_allowed = false;
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: None,
+            calling_authentication_value: None,
+            user_information: request
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&build_hdlc_request(0x0002, aarq))
+            .expect("server failed to handle aarq");
+        let aare = parse_aare(&response_bytes);
+        assert_eq!(aare.result, 1);
+        assert_eq!(aare.result_source_diagnostic, 1);
+    }
+
+    #[test]
+    fn initiate_request_with_zero_client_pdu_is_rejected() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let mut request = default_initiate_request();
+        request.client_max_receive_pdu_size = 0;
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: None,
+            calling_authentication_value: None,
+            user_information: request
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&build_hdlc_request(0x0002, aarq))
+            .expect("server failed to handle aarq");
+        let aare = parse_aare(&response_bytes);
+        assert_eq!(aare.result, 1);
+        assert_eq!(aare.result_source_diagnostic, 3);
+    }
+
+    #[test]
+    fn lls_challenge_response_with_wrong_mac_fails() {
+        let mut server = Server::new(0x0001, DummyTransport, Some(b"password".to_vec()), None);
+
+        let association_address = 0x0004;
+        let user_information = default_initiate_request()
+            .to_user_information()
+            .expect("failed to encode initiate request");
+        let initial_request = build_hdlc_request(
+            association_address,
+            AarqApdu {
+                application_context_name: b"CTX".to_vec(),
+                sender_acse_requirements: 0,
+                mechanism_name: Some(b"LLS".to_vec()),
+                calling_authentication_value: None,
+                user_information: user_information.clone(),
+            },
+        );
+
+        let initial_response = server
+            .handle_request(&initial_request)
+            .expect("server failed to issue challenge");
+        let issued_challenge = parse_aare(&initial_response)
+            .responding_authentication_value
+            .expect("expected challenge");
+
+        let mut wrong_response =
+            lls_authenticate(b"password", &issued_challenge).expect("failed to compute mac");
+        wrong_response[0] ^= 0xFF;
+
+        let follow_up_response = server
+            .handle_request(&build_hdlc_request(
+                association_address,
+                AarqApdu {
+                    application_context_name: b"CTX".to_vec(),
+                    sender_acse_requirements: 0,
+                    mechanism_name: Some(b"LLS".to_vec()),
+                    calling_authentication_value: Some(wrong_response),
+                    user_information,
+                },
+            ))
+            .expect("server failed to process response");
+
+        let aare = parse_aare(&follow_up_response);
+
+        assert_eq!(aare.result, 1);
+        assert!(aare.responding_authentication_value.is_none());
+        let initiate_response = InitiateResponse::from_user_information(&aare.user_information)
+            .expect("expected initiate response");
+        assert_eq!(initiate_response.vaa_name, 0x0007);
+        assert!(!server
+            .lls_challenges
+            .get(&association_address)
+            .expect("challenge should remain for retry")
+            .is_empty());
     }
 }
