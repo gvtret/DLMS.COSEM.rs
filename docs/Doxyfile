@@ -20,6 +20,7 @@ WARN_NO_PARAMDOC       = YES
 FULL_PATH_NAMES        = NO
 STRIP_FROM_PATH        = dlms-cosem-rs/src
 ALIASES                = "plantuml=\"\""
+PLANTUML_JAR_PATH      = /usr/share/plantuml/plantuml.jar
 HAVE_DOT               = YES
 DOT_IMAGE_FORMAT       = svg
 CALL_GRAPH             = YES
