@@ -709,6 +709,8 @@ mod tests {
     use crate::extended_register::ExtendedRegister;
     use crate::profile_generic::ProfileGeneric;
     use crate::register::Register;
+    use crate::sap_assignment::SapAssignment;
+    use crate::security_setup::SecuritySetup;
     use crate::types::CosemData;
     use crate::xdlms::{
         ActionRequest, ActionRequestNormal, ActionResponse, ActionResult, AssociationParameters,
@@ -1601,7 +1603,17 @@ mod tests {
         server.register_object(logical_name, Box::new(ExtendedRegister::new()));
         activate_association(&mut server, association_address);
 
-        let allowed_request = SetRequest::Normal(SetRequestNormal {
+        {
+            let register = server
+                .objects
+                .get_mut(&logical_name)
+                .expect("missing extended register");
+            register
+                .set_attribute(2, CosemData::Unsigned(77))
+                .expect("failed to seed register value");
+        }
+
+        let get_request = GetRequest::Normal(GetRequestNormal {
             invoke_id_and_priority: 1,
             cosem_attribute_descriptor: CosemAttributeDescriptor {
                 class_id: 4,
@@ -1609,43 +1621,40 @@ mod tests {
                 attribute_id: 2,
             },
             access_selection: None,
-            value: CosemData::Unsigned(77),
         });
 
         let frame = HdlcFrame {
             address: association_address,
             control: 0,
-            information: allowed_request
+            information: get_request
                 .to_bytes()
-                .expect("failed to encode set request"),
+                .expect("failed to encode get request"),
         };
 
         let response_bytes = server
             .handle_request(&frame.to_bytes().expect("failed to encode frame"))
-            .expect("server failed to handle set request");
+            .expect("server failed to handle get request");
 
         let response_frame =
             HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
         let response =
-            SetResponse::from_bytes(&response_frame.information).expect("failed to decode set");
+            GetResponse::from_bytes(&response_frame.information).expect("failed to decode get");
 
-        let SetResponse::Normal(response) = response else {
-            panic!("expected normal set response");
+        let GetResponse::Normal(response) = response else {
+            panic!("expected normal get response");
         };
 
-        assert_eq!(response.result, DataAccessResult::Success);
-        let register = server
-            .objects
-            .get(&logical_name)
-            .expect("missing extended register");
-        assert_eq!(register.get_attribute(2), Some(CosemData::Unsigned(77)));
+        match response.result {
+            GetDataResult::Data(CosemData::Unsigned(value)) => assert_eq!(value, 77),
+            other => panic!("unexpected get response: {other:?}"),
+        };
 
         let denied_request = SetRequest::Normal(SetRequestNormal {
             invoke_id_and_priority: 2,
             cosem_attribute_descriptor: CosemAttributeDescriptor {
                 class_id: 4,
                 instance_id: logical_name,
-                attribute_id: 4,
+                attribute_id: 2,
             },
             access_selection: None,
             value: CosemData::NullData,
@@ -1683,26 +1692,15 @@ mod tests {
         server.register_object(logical_name, Box::new(ExtendedRegister::new()));
         activate_association(&mut server, association_address);
 
-        let set_value = SetRequest::Normal(SetRequestNormal {
-            invoke_id_and_priority: 1,
-            cosem_attribute_descriptor: CosemAttributeDescriptor {
-                class_id: 4,
-                instance_id: logical_name,
-                attribute_id: 2,
-            },
-            access_selection: None,
-            value: CosemData::Unsigned(15),
-        });
-
-        let frame = HdlcFrame {
-            address: association_address,
-            control: 0,
-            information: set_value.to_bytes().expect("failed to encode set request"),
-        };
-
-        let _ = server
-            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
-            .expect("server failed to handle set request");
+        {
+            let register = server
+                .objects
+                .get_mut(&logical_name)
+                .expect("missing extended register");
+            register
+                .set_attribute(2, CosemData::Unsigned(15))
+                .expect("failed to seed register value");
+        }
 
         let request = ActionRequest::Normal(ActionRequestNormal {
             invoke_id_and_priority: 2,
@@ -1866,7 +1864,17 @@ mod tests {
         server.register_object(logical_name, Box::new(ProfileGeneric::new()));
         activate_association(&mut server, association_address);
 
-        let writable_request = SetRequest::Normal(SetRequestNormal {
+        {
+            let profile = server
+                .objects
+                .get_mut(&logical_name)
+                .expect("missing profile generic");
+            profile
+                .set_attribute(3, CosemData::Array(Vec::new()))
+                .expect("failed to seed capture objects");
+        }
+
+        let get_request = GetRequest::Normal(GetRequestNormal {
             invoke_id_and_priority: 1,
             cosem_attribute_descriptor: CosemAttributeDescriptor {
                 class_id: 7,
@@ -1874,7 +1882,43 @@ mod tests {
                 attribute_id: 3,
             },
             access_selection: None,
-            value: CosemData::Array(Vec::new()),
+        });
+
+        let frame = HdlcFrame {
+            address: association_address,
+            control: 0,
+            information: get_request
+                .to_bytes()
+                .expect("failed to encode get request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle get request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            GetResponse::from_bytes(&response_frame.information).expect("failed to decode get");
+
+        let GetResponse::Normal(response) = response else {
+            panic!("expected normal get response");
+        };
+
+        match response.result {
+            GetDataResult::Data(CosemData::Array(values)) => assert!(values.is_empty()),
+            other => panic!("unexpected get response: {other:?}"),
+        };
+
+        let writable_request = SetRequest::Normal(SetRequestNormal {
+            invoke_id_and_priority: 2,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 7,
+                instance_id: logical_name,
+                attribute_id: 4,
+            },
+            access_selection: None,
+            value: CosemData::DoubleLongUnsigned(900),
         });
 
         let frame = HdlcFrame {
@@ -1899,13 +1943,21 @@ mod tests {
         };
 
         assert_eq!(response.result, DataAccessResult::Success);
+        let profile = server
+            .objects
+            .get(&logical_name)
+            .expect("missing profile generic");
+        assert_eq!(
+            profile.get_attribute(4),
+            Some(CosemData::DoubleLongUnsigned(900))
+        );
 
         let denied_request = SetRequest::Normal(SetRequestNormal {
-            invoke_id_and_priority: 2,
+            invoke_id_and_priority: 3,
             cosem_attribute_descriptor: CosemAttributeDescriptor {
                 class_id: 7,
                 instance_id: logical_name,
-                attribute_id: 2,
+                attribute_id: 3,
             },
             access_selection: None,
             value: CosemData::Array(Vec::new()),
@@ -2298,6 +2350,177 @@ mod tests {
             response.single_response.result,
             ActionResult::ReadWriteDenied
         );
+    }
+
+    #[test]
+    fn security_setup_attribute_access_rights_enforced() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+        let association_address = 0x010D;
+        let logical_name = [0, 0, 1, 0, 0, 242];
+        server.register_object(logical_name, Box::new(SecuritySetup::new()));
+        activate_association(&mut server, association_address);
+
+        {
+            let setup = server
+                .objects
+                .get_mut(&logical_name)
+                .expect("missing security setup");
+            setup
+                .set_attribute(2, CosemData::Unsigned(2))
+                .expect("failed to seed security policy");
+        }
+
+        let get_request = GetRequest::Normal(GetRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 64,
+                instance_id: logical_name,
+                attribute_id: 2,
+            },
+            access_selection: None,
+        });
+
+        let frame = HdlcFrame {
+            address: association_address,
+            control: 0,
+            information: get_request
+                .to_bytes()
+                .expect("failed to encode get request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle get request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            GetResponse::from_bytes(&response_frame.information).expect("failed to decode get");
+
+        let GetResponse::Normal(response) = response else {
+            panic!("expected normal get response");
+        };
+
+        match response.result {
+            GetDataResult::Data(CosemData::Unsigned(value)) => assert_eq!(value, 2),
+            other => panic!("unexpected get response: {other:?}"),
+        };
+
+        let denied_request = SetRequest::Normal(SetRequestNormal {
+            invoke_id_and_priority: 2,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 64,
+                instance_id: logical_name,
+                attribute_id: 2,
+            },
+            access_selection: None,
+            value: CosemData::Unsigned(3),
+        });
+
+        let frame = HdlcFrame {
+            address: association_address,
+            control: 0,
+            information: denied_request
+                .to_bytes()
+                .expect("failed to encode set request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle set request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            SetResponse::from_bytes(&response_frame.information).expect("failed to decode set");
+
+        let SetResponse::Normal(response) = response else {
+            panic!("expected normal set response");
+        };
+
+        assert_eq!(response.result, DataAccessResult::ReadWriteDenied);
+    }
+
+    #[test]
+    fn sap_assignment_attribute_access_rights_enforced() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+        let association_address = 0x010E;
+        let logical_name = [0, 0, 1, 0, 0, 241];
+        server.register_object(
+            logical_name,
+            Box::new(SapAssignment::with_logical_device_names(b"LN".to_vec())),
+        );
+        activate_association(&mut server, association_address);
+
+        let get_request = GetRequest::Normal(GetRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 21,
+                instance_id: logical_name,
+                attribute_id: 2,
+            },
+            access_selection: None,
+        });
+
+        let frame = HdlcFrame {
+            address: association_address,
+            control: 0,
+            information: get_request
+                .to_bytes()
+                .expect("failed to encode get request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle get request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            GetResponse::from_bytes(&response_frame.information).expect("failed to decode get");
+
+        let GetResponse::Normal(response) = response else {
+            panic!("expected normal get response");
+        };
+
+        match response.result {
+            GetDataResult::Data(CosemData::OctetString(value)) => assert_eq!(value, b"LN".to_vec()),
+            other => panic!("unexpected get response: {other:?}"),
+        };
+
+        let denied_request = SetRequest::Normal(SetRequestNormal {
+            invoke_id_and_priority: 2,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 21,
+                instance_id: logical_name,
+                attribute_id: 2,
+            },
+            access_selection: None,
+            value: CosemData::OctetString(b"UPDATED".to_vec()),
+        });
+
+        let frame = HdlcFrame {
+            address: association_address,
+            control: 0,
+            information: denied_request
+                .to_bytes()
+                .expect("failed to encode set request"),
+        };
+
+        let response_bytes = server
+            .handle_request(&frame.to_bytes().expect("failed to encode frame"))
+            .expect("server failed to handle set request");
+
+        let response_frame =
+            HdlcFrame::from_bytes(&response_bytes).expect("failed to decode response frame");
+        let response =
+            SetResponse::from_bytes(&response_frame.information).expect("failed to decode set");
+
+        let SetResponse::Normal(response) = response else {
+            panic!("expected normal set response");
+        };
+
+        assert_eq!(response.result, DataAccessResult::ReadWriteDenied);
     }
 
     #[test]

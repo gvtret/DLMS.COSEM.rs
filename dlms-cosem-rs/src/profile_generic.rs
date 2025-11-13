@@ -50,7 +50,7 @@ impl CosemObject for ProfileGeneric {
     fn attribute_access_rights(&self) -> Vec<AttributeAccessDescriptor> {
         vec![
             AttributeAccessDescriptor::new(2, AttributeAccessMode::Read),
-            AttributeAccessDescriptor::new(3, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(3, AttributeAccessMode::Read),
             AttributeAccessDescriptor::new(4, AttributeAccessMode::ReadWrite),
             AttributeAccessDescriptor::new(5, AttributeAccessMode::ReadWrite),
             AttributeAccessDescriptor::new(6, AttributeAccessMode::ReadWrite),
