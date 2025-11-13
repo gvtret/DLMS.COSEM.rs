@@ -1,5 +1,8 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
+use crate::cosem_object::{
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, CosemObjectCallbackHandlers,
+    MethodAccessDescriptor, MethodAccessMode,
+};
 use crate::types::CosemData;
 use std::sync::Arc;
 
@@ -37,6 +40,19 @@ impl Default for ExtendedRegister {
 impl CosemObject for ExtendedRegister {
     fn class_id(&self) -> u16 {
         4
+    }
+
+    fn attribute_access_rights(&self) -> Vec<AttributeAccessDescriptor> {
+        vec![
+            AttributeAccessDescriptor::new(2, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(3, AttributeAccessMode::Read),
+            AttributeAccessDescriptor::new(4, AttributeAccessMode::Read),
+            AttributeAccessDescriptor::new(5, AttributeAccessMode::Read),
+        ]
+    }
+
+    fn method_access_rights(&self) -> Vec<MethodAccessDescriptor> {
+        vec![MethodAccessDescriptor::new(1, MethodAccessMode::Access)]
     }
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {

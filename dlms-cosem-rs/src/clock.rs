@@ -1,5 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
+use crate::cosem_object::{
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, CosemObjectCallbackHandlers,
+};
 use crate::types::CosemData;
 use std::sync::Arc;
 
@@ -43,6 +45,18 @@ impl Default for Clock {
 impl CosemObject for Clock {
     fn class_id(&self) -> u16 {
         8
+    }
+
+    fn attribute_access_rights(&self) -> Vec<AttributeAccessDescriptor> {
+        vec![
+            AttributeAccessDescriptor::new(2, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(3, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(4, AttributeAccessMode::Read),
+            AttributeAccessDescriptor::new(5, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(6, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(7, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(8, AttributeAccessMode::ReadWrite),
+        ]
     }
 
     fn get_attribute(&self, attribute_id: CosemObjectAttributeId) -> Option<CosemData> {
