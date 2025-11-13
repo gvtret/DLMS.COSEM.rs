@@ -10,6 +10,7 @@ use crate::hdlc::{HdlcFrame, HdlcFrameError};
 use crate::security::lls_authenticate;
 use crate::security::{hls_decrypt, hls_encrypt, SecurityError};
 use crate::transport::Transport;
+use crate::types::CosemData;
 use crate::xdlms::{
     ActionRequest, ActionResponse, ActionResponseNormal, ActionResult, AssociationParameters,
     DataAccessResult, GetDataResult, GetRequest, GetResponse, GetResponseNormal, InitiateRequest,
@@ -18,8 +19,15 @@ use crate::xdlms::{
 use rand_core::{OsRng, RngCore};
 use std::sync::{Arc, Mutex};
 
-const DEFAULT_ASSOCIATION_LN: [u8; 6] = [0x00, 0x00, 0x28, 0x00, 0x00, 0xFF];
-const DEFAULT_CLIENT_SAP: u16 = 0x0001;
+// Clause 6.3 of СТО 34.01-5.1-013-2023 prescribes the standard HDLC client SAPs
+// for public (16), meter reader (32), and configurator (48) associations.
+const PUBLIC_CLIENT_SAP: u16 = 0x0010;
+const METER_READER_CLIENT_SAP: u16 = 0x0020;
+const CONFIGURATOR_CLIENT_SAP: u16 = 0x0030;
+
+const PUBLIC_ASSOCIATION_LN: [u8; 6] = [0x00, 0x00, 0x28, 0x00, 0x01, 0xFF];
+const METER_READER_ASSOCIATION_LN: [u8; 6] = [0x00, 0x00, 0x28, 0x00, 0x02, 0xFF];
+const CONFIGURATOR_ASSOCIATION_LN: [u8; 6] = [0x00, 0x00, 0x28, 0x00, 0x03, 0xFF];
 use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::vec::Vec;
@@ -51,6 +59,9 @@ pub struct Server<T: Transport> {
     password: Option<Vec<u8>>,
     key: Option<Vec<u8>>,
     objects: BTreeMap<[u8; 6], Box<dyn CosemObject>>,
+    association_logical_names: BTreeMap<u16, [u8; 6]>,
+    association_templates: BTreeMap<[u8; 6], AssociationLN>,
+    client_association_instances: BTreeMap<u16, Box<dyn CosemObject>>,
     lls_challenges: BTreeMap<u16, Vec<u8>>,
     association_parameters: AssociationParameters,
     active_associations: BTreeMap<u16, AssociationContext>,
@@ -77,21 +88,30 @@ impl<T: Transport> Server<T> {
             password,
             key,
             objects: BTreeMap::new(),
+            association_logical_names: BTreeMap::new(),
+            association_templates: BTreeMap::new(),
+            client_association_instances: BTreeMap::new(),
             lls_challenges: BTreeMap::new(),
             association_parameters: AssociationParameters::default(),
             active_associations: BTreeMap::new(),
             association_object_list,
         };
 
-        let association_ln = AssociationLN::new(
-            Arc::clone(&server.association_object_list),
-            ((DEFAULT_CLIENT_SAP as u32) << 16) | address as u32,
-            b"LN_WITH_NO_CIPHERING".to_vec(),
-            Vec::new(),
-            auth_mechanism_name,
-        );
+        let mut register_predefined_association = |client_sap: u16, logical_name: [u8; 6]| {
+            let association = AssociationLN::new(
+                Arc::clone(&server.association_object_list),
+                ((client_sap as u32) << 16) | address as u32,
+                b"LN_WITH_NO_CIPHERING".to_vec(),
+                Vec::new(),
+                auth_mechanism_name.clone(),
+            );
 
-        server.register_object_internal(DEFAULT_ASSOCIATION_LN, Box::new(association_ln));
+            server.register_association_for_client(client_sap, logical_name, association);
+        };
+
+        register_predefined_association(PUBLIC_CLIENT_SAP, PUBLIC_ASSOCIATION_LN);
+        register_predefined_association(METER_READER_CLIENT_SAP, METER_READER_ASSOCIATION_LN);
+        register_predefined_association(CONFIGURATOR_CLIENT_SAP, CONFIGURATOR_ASSOCIATION_LN);
         server
     }
 
@@ -101,6 +121,19 @@ impl<T: Transport> Server<T> {
 
     pub fn register_object(&mut self, instance_id: [u8; 6], object: Box<dyn CosemObject>) {
         self.register_object_internal(instance_id, object);
+    }
+
+    pub fn register_association_for_client(
+        &mut self,
+        client_sap: u16,
+        logical_name: [u8; 6],
+        association: AssociationLN,
+    ) {
+        self.association_logical_names
+            .insert(client_sap, logical_name);
+        self.association_templates
+            .insert(logical_name, association.clone());
+        self.register_object_internal(logical_name, Box::new(association));
     }
 
     pub fn handle_frame(&mut self, request_bytes: &[u8]) -> Result<Vec<u8>, ServerError<T::Error>> {
@@ -196,6 +229,8 @@ impl<T: Transport> Server<T> {
             let association_address = request_frame.address;
             if aare.result != 0 {
                 self.active_associations.remove(&association_address);
+                self.client_association_instances
+                    .remove(&association_address);
                 return Ok(HdlcFrame {
                     address: self.address,
                     control: 0,
@@ -231,6 +266,8 @@ impl<T: Transport> Server<T> {
                             .insert(association_address, challenge.clone());
                         aare.responding_authentication_value = Some(challenge);
                         self.active_associations.remove(&association_address);
+                        self.client_association_instances
+                            .remove(&association_address);
                     }
                 }
             }
@@ -241,11 +278,51 @@ impl<T: Transport> Server<T> {
                         client_max_receive_pdu_size: initiate_request.client_max_receive_pdu_size,
                     },
                 );
+
+                let logical_name = if let Some(&logical_name) =
+                    self.association_logical_names.get(&association_address)
+                {
+                    logical_name
+                } else {
+                    self.association_logical_names
+                        .insert(association_address, PUBLIC_ASSOCIATION_LN);
+                    PUBLIC_ASSOCIATION_LN
+                };
+
+                let template = self
+                    .association_templates
+                    .get(&logical_name)
+                    .cloned()
+                    .or_else(|| {
+                        self.association_templates
+                            .get(&PUBLIC_ASSOCIATION_LN)
+                            .cloned()
+                    });
+
+                let Some(template) = template else {
+                    self.client_association_instances
+                        .remove(&association_address);
+                    self.active_associations.remove(&association_address);
+                    return Err(ServerError::DlmsError(DlmsError::Xdlms));
+                };
+
+                let partners_id = ((association_address as u32) << 16) | self.address as u32;
+
+                let entry = self
+                    .client_association_instances
+                    .entry(association_address)
+                    .or_insert_with(|| Box::new(template.clone()) as Box<dyn CosemObject>);
+
+                let _ = entry
+                    .as_mut()
+                    .set_attribute(3, CosemData::DoubleLongUnsigned(partners_id));
             }
             aare.to_bytes()?
         } else if let Ok((_, release_req)) = ArlrqApdu::from_bytes(&request_frame.information) {
             self.active_associations.remove(&request_frame.address);
             self.lls_challenges.remove(&request_frame.address);
+            self.client_association_instances
+                .remove(&request_frame.address);
 
             let reason = release_req.reason.unwrap_or(0);
             let rlre = ArlreApdu {
@@ -269,10 +346,8 @@ impl<T: Transport> Server<T> {
                 });
                 denial.to_bytes()?
             } else {
-                let Some(object) = self
-                    .objects
-                    .get_mut(&get_req.cosem_attribute_descriptor.instance_id)
-                else {
+                let instance_id = get_req.cosem_attribute_descriptor.instance_id;
+                let Some(object) = self.resolve_object(request_frame.address, instance_id) else {
                     return Err(ServerError::DlmsError(DlmsError::Xdlms));
                 };
 
@@ -290,9 +365,7 @@ impl<T: Transport> Server<T> {
                     denial.to_bytes()?
                 } else {
                     if let Some(callbacks) = object.callbacks() {
-                        if let Err(result_code) =
-                            callbacks.call_pre_read(object.as_ref(), attribute_id)
-                        {
+                        if let Err(result_code) = callbacks.call_pre_read(&*object, attribute_id) {
                             let denial = GetResponse::Normal(GetResponseNormal {
                                 invoke_id_and_priority: get_req.invoke_id_and_priority,
                                 result: GetDataResult::DataAccessResult(result_code),
@@ -305,7 +378,7 @@ impl<T: Transport> Server<T> {
 
                     if let Some(callbacks) = object.callbacks() {
                         if let Err(result_code) =
-                            callbacks.call_post_read(object.as_ref(), attribute_id, &mut result)
+                            callbacks.call_post_read(&*object, attribute_id, &mut result)
                         {
                             let denial = GetResponse::Normal(GetResponseNormal {
                                 invoke_id_and_priority: get_req.invoke_id_and_priority,
@@ -340,10 +413,8 @@ impl<T: Transport> Server<T> {
                 });
                 denial.to_bytes()?
             } else {
-                let Some(object) = self
-                    .objects
-                    .get_mut(&set_req.cosem_attribute_descriptor.instance_id)
-                else {
+                let instance_id = set_req.cosem_attribute_descriptor.instance_id;
+                let Some(object) = self.resolve_object(request_frame.address, instance_id) else {
                     return Err(ServerError::DlmsError(DlmsError::Xdlms));
                 };
 
@@ -363,7 +434,7 @@ impl<T: Transport> Server<T> {
                     let mut value = set_req.value;
                     if let Some(callbacks) = object.callbacks() {
                         if let Err(result_code) =
-                            callbacks.call_pre_write(object.as_mut(), attribute_id, &mut value)
+                            callbacks.call_pre_write(object, attribute_id, &mut value)
                         {
                             let denial = SetResponse::Normal(SetResponseNormal {
                                 invoke_id_and_priority: set_req.invoke_id_and_priority,
@@ -377,7 +448,7 @@ impl<T: Transport> Server<T> {
                     let response_code = result.map_or(DataAccessResult::ObjectUnavailable, |_| {
                         if let Some(callbacks) = object.callbacks() {
                             if let Err(result_code) =
-                                callbacks.call_post_write(object.as_mut(), attribute_id, &value)
+                                callbacks.call_post_write(object, attribute_id, &value)
                             {
                                 return result_code;
                             }
@@ -409,10 +480,8 @@ impl<T: Transport> Server<T> {
                 });
                 denial.to_bytes()?
             } else {
-                let Some(object) = self
-                    .objects
-                    .get_mut(&action_req.cosem_method_descriptor.instance_id)
-                else {
+                let instance_id = action_req.cosem_method_descriptor.instance_id;
+                let Some(object) = self.resolve_object(request_frame.address, instance_id) else {
                     return Err(ServerError::DlmsError(DlmsError::Xdlms));
                 };
 
@@ -433,7 +502,7 @@ impl<T: Transport> Server<T> {
                         .unwrap_or(crate::types::CosemData::NullData);
                     if let Some(callbacks) = object.callbacks() {
                         if let Err(result_code) =
-                            callbacks.call_pre_action(object.as_mut(), method_id, &mut parameters)
+                            callbacks.call_pre_action(object, method_id, &mut parameters)
                         {
                             let denial = ActionResponse::Normal(ActionResponseNormal {
                                 invoke_id_and_priority: action_req.invoke_id_and_priority,
@@ -450,7 +519,7 @@ impl<T: Transport> Server<T> {
 
                     if let Some(callbacks) = object.callbacks() {
                         if let Err(result_code) =
-                            callbacks.call_post_action(object.as_mut(), method_id, &mut result)
+                            callbacks.call_post_action(object, method_id, &mut result)
                         {
                             let denial = ActionResponse::Normal(ActionResponseNormal {
                                 invoke_id_and_priority: action_req.invoke_id_and_priority,
@@ -507,6 +576,28 @@ impl<T: Transport> Server<T> {
             information,
         }
         .to_bytes()?)
+    }
+
+    fn resolve_object(
+        &mut self,
+        client_address: u16,
+        logical_name: [u8; 6],
+    ) -> Option<&mut dyn CosemObject> {
+        if self
+            .association_logical_names
+            .get(&client_address)
+            .is_some_and(|ln| *ln == logical_name)
+        {
+            if let Some(association) = self.client_association_instances.get_mut(&client_address) {
+                return Some(association.as_mut());
+            }
+        }
+
+        if let Some(object) = self.objects.get_mut(&logical_name) {
+            return Some(object.as_mut());
+        }
+
+        None
     }
 
     fn negotiate_initiate_response(
@@ -679,10 +770,14 @@ mod tests {
                 .association_object_list
                 .lock()
                 .expect("association list poisoned");
-            assert_eq!(list.len(), 1);
-            assert_eq!(list[0].logical_name, DEFAULT_ASSOCIATION_LN);
-            assert_eq!(list[0].class_id, 15);
-            assert!(!list[0].attribute_access.is_empty());
+            let logical_names: Vec<[u8; 6]> = list.iter().map(|entry| entry.logical_name).collect();
+            assert_eq!(logical_names.len(), 3);
+            assert!(logical_names.contains(&PUBLIC_ASSOCIATION_LN));
+            assert!(logical_names.contains(&METER_READER_ASSOCIATION_LN));
+            assert!(logical_names.contains(&CONFIGURATOR_ASSOCIATION_LN));
+            for entry in list.iter().filter(|entry| entry.class_id == 15) {
+                assert!(!entry.attribute_access.is_empty());
+            }
         }
 
         let logical_name = [0, 0, 1, 0, 0, 255];
@@ -692,7 +787,7 @@ mod tests {
             .association_object_list
             .lock()
             .expect("association list poisoned");
-        assert_eq!(list.len(), 2);
+        assert_eq!(list.len(), 4);
         let register_entry = list
             .iter()
             .find(|entry| entry.logical_name == logical_name)
@@ -701,6 +796,120 @@ mod tests {
         assert_eq!(register_entry.version, 0);
         assert_eq!(register_entry.attribute_access.len(), 2);
         assert_eq!(register_entry.method_access.len(), 1);
+    }
+
+    #[test]
+    fn association_ln_instances_are_client_specific() {
+        let mut server = Server::new(0x0001, DummyTransport, None, None);
+
+        let secondary_client = METER_READER_CLIENT_SAP;
+        let secondary_logical_name = METER_READER_ASSOCIATION_LN;
+
+        let aarq = AarqApdu {
+            application_context_name: b"CTX".to_vec(),
+            sender_acse_requirements: 0,
+            mechanism_name: None,
+            calling_authentication_value: None,
+            user_information: default_initiate_request()
+                .to_user_information()
+                .expect("failed to encode initiate request"),
+        };
+
+        let default_response = server
+            .handle_request(&build_hdlc_request(PUBLIC_CLIENT_SAP, aarq.clone()))
+            .expect("default association aarq failed");
+        assert_eq!(parse_aare(&default_response).result, 0);
+
+        let secondary_response = server
+            .handle_request(&build_hdlc_request(secondary_client, aarq))
+            .expect("secondary association aarq failed");
+        assert_eq!(parse_aare(&secondary_response).result, 0);
+
+        let default_get = GetRequest::Normal(GetRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 15,
+                instance_id: PUBLIC_ASSOCIATION_LN,
+                attribute_id: 3,
+            },
+            access_selection: None,
+        });
+
+        let default_frame = HdlcFrame {
+            address: PUBLIC_CLIENT_SAP,
+            control: 0,
+            information: default_get
+                .to_bytes()
+                .expect("failed to encode default get request"),
+        };
+
+        let default_get_response = server
+            .handle_request(&default_frame.to_bytes().expect("failed to encode frame"))
+            .expect("default association get failed");
+
+        let default_data = match GetResponse::from_bytes(
+            &HdlcFrame::from_bytes(&default_get_response)
+                .expect("failed to decode response frame")
+                .information,
+        )
+        .expect("failed to decode default get")
+        {
+            GetResponse::Normal(GetResponseNormal { result, .. }) => result,
+            other => panic!("unexpected response: {other:?}"),
+        };
+
+        let secondary_get = GetRequest::Normal(GetRequestNormal {
+            invoke_id_and_priority: 1,
+            cosem_attribute_descriptor: CosemAttributeDescriptor {
+                class_id: 15,
+                instance_id: secondary_logical_name,
+                attribute_id: 3,
+            },
+            access_selection: None,
+        });
+
+        let secondary_frame = HdlcFrame {
+            address: secondary_client,
+            control: 0,
+            information: secondary_get
+                .to_bytes()
+                .expect("failed to encode secondary get request"),
+        };
+
+        let secondary_get_response = server
+            .handle_request(&secondary_frame.to_bytes().expect("failed to encode frame"))
+            .expect("secondary association get failed");
+
+        let secondary_data = match GetResponse::from_bytes(
+            &HdlcFrame::from_bytes(&secondary_get_response)
+                .expect("failed to decode response frame")
+                .information,
+        )
+        .expect("failed to decode secondary get")
+        {
+            GetResponse::Normal(GetResponseNormal { result, .. }) => result,
+            other => panic!("unexpected response: {other:?}"),
+        };
+
+        match default_data {
+            GetDataResult::Data(CosemData::DoubleLongUnsigned(value)) => {
+                assert_eq!(
+                    value,
+                    ((PUBLIC_CLIENT_SAP as u32) << 16) | server.address as u32
+                );
+            }
+            other => panic!("unexpected data: {other:?}"),
+        }
+
+        match secondary_data {
+            GetDataResult::Data(CosemData::DoubleLongUnsigned(value)) => {
+                assert_eq!(
+                    value,
+                    ((secondary_client as u32) << 16) | server.address as u32
+                );
+            }
+            other => panic!("unexpected data: {other:?}"),
+        }
     }
 
     #[test]

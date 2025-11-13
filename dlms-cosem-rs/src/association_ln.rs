@@ -58,7 +58,7 @@ impl ObjectListEntry {
 }
 
 /// Association LN (Class ID 15)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssociationLN {
     // Attribute 2: A list of all objects that are accessible through the association.
     // Kept in sync via a shared handle updated by the server.
