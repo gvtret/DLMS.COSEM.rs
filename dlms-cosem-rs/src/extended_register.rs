@@ -44,7 +44,7 @@ impl CosemObject for ExtendedRegister {
 
     fn attribute_access_rights(&self) -> Vec<AttributeAccessDescriptor> {
         vec![
-            AttributeAccessDescriptor::new(2, AttributeAccessMode::ReadWrite),
+            AttributeAccessDescriptor::new(2, AttributeAccessMode::Read),
             AttributeAccessDescriptor::new(3, AttributeAccessMode::Read),
             AttributeAccessDescriptor::new(4, AttributeAccessMode::Read),
             AttributeAccessDescriptor::new(5, AttributeAccessMode::Read),
