@@ -1,11 +1,39 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 use std::vec::Vec;
 
 #[derive(Debug)]
 pub struct SapAssignment {
     pub logical_device_name_list: Vec<u8>,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
+}
+
+impl SapAssignment {
+    pub fn new() -> Self {
+        Self {
+            logical_device_name_list: Vec::new(),
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
+        }
+    }
+
+    pub fn with_logical_device_names(names: Vec<u8>) -> Self {
+        Self {
+            logical_device_name_list: names,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
+        }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
+    }
+}
+
+impl Default for SapAssignment {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CosemObject for SapAssignment {
@@ -36,5 +64,9 @@ impl CosemObject for SapAssignment {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }

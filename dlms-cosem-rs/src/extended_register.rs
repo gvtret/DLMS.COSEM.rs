@@ -1,6 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ExtendedRegister {
@@ -8,6 +9,7 @@ pub struct ExtendedRegister {
     scaler_unit: CosemData,
     status: CosemData,
     capture_time: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl ExtendedRegister {
@@ -17,7 +19,12 @@ impl ExtendedRegister {
             scaler_unit: CosemData::Structure(vec![CosemData::Integer(0), CosemData::Enum(255)]),
             status: CosemData::NullData,
             capture_time: CosemData::NullData,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -77,6 +84,10 @@ impl CosemObject for ExtendedRegister {
             1 => self.reset(),
             _ => None,
         }
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

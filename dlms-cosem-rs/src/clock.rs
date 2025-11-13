@@ -1,6 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Clock {
@@ -11,6 +12,7 @@ pub struct Clock {
     daylight_savings_end: CosemData,
     daylight_savings_deviation: CosemData,
     enabled: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl Clock {
@@ -23,7 +25,12 @@ impl Clock {
             daylight_savings_end: CosemData::NullData,
             daylight_savings_deviation: CosemData::NullData,
             enabled: CosemData::NullData,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -95,6 +102,10 @@ impl CosemObject for Clock {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

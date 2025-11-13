@@ -1,14 +1,16 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
 use crate::cosem_object::{
-    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, MethodAccessDescriptor,
-    MethodAccessMode,
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, CosemObjectCallbackHandlers,
+    MethodAccessDescriptor, MethodAccessMode,
 };
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Register {
     value: CosemData,
     scaler_unit: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl Register {
@@ -16,7 +18,12 @@ impl Register {
         Self {
             value: CosemData::Unsigned(0),
             scaler_unit: CosemData::Structure(vec![CosemData::Integer(0), CosemData::Enum(255)]),
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -77,6 +84,10 @@ impl CosemObject for Register {
             1 => self.reset(),
             _ => None,
         }
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 use std::vec::Vec;
 
 #[derive(Debug)]
@@ -9,6 +10,7 @@ pub struct SecuritySetup {
     security_suite: u8,
     client_system_title: Vec<u8>,
     server_system_title: Vec<u8>,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl SecuritySetup {
@@ -18,7 +20,12 @@ impl SecuritySetup {
             security_suite: 0,
             client_system_title: Vec::new(),
             server_system_title: Vec::new(),
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -91,6 +98,10 @@ impl CosemObject for SecuritySetup {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

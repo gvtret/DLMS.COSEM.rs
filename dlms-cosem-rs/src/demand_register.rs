@@ -1,6 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct DemandRegister {
@@ -12,6 +13,7 @@ pub struct DemandRegister {
     start_time_current: CosemData,
     period: CosemData,
     number_of_periods: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl DemandRegister {
@@ -25,7 +27,12 @@ impl DemandRegister {
             start_time_current: CosemData::NullData,
             period: CosemData::NullData,
             number_of_periods: CosemData::NullData,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -102,6 +109,10 @@ impl CosemObject for DemandRegister {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

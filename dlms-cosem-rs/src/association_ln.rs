@@ -1,7 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
 use crate::cosem_object::{
-    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, MethodAccessDescriptor,
-    MethodAccessMode,
+    AttributeAccessDescriptor, AttributeAccessMode, CosemObject, CosemObjectCallbackHandlers,
+    MethodAccessDescriptor, MethodAccessMode,
 };
 use crate::types::CosemData;
 use std::sync::{Arc, Mutex};
@@ -75,6 +75,7 @@ pub struct AssociationLN {
     // Attribute 6: The name of the authentication mechanism (e.g., Low, High).
     // An OID encoded as an octet-string.
     authentication_mechanism_name: Vec<u8>,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl AssociationLN {
@@ -91,7 +92,12 @@ impl AssociationLN {
             application_context_name,
             xdlms_context_info,
             authentication_mechanism_name,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 
     fn reply_to_hls_authentication(&mut self, data: CosemData) -> Option<CosemData> {
@@ -208,6 +214,10 @@ impl CosemObject for AssociationLN {
             1 => self.reply_to_hls_authentication(data),
             _ => None,
         }
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 
