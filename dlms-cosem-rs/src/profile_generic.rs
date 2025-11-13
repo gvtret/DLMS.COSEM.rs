@@ -1,6 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ProfileGeneric {
@@ -11,6 +12,7 @@ pub struct ProfileGeneric {
     sort_object: CosemData,
     entries_in_use: CosemData,
     profile_entries: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl ProfileGeneric {
@@ -23,7 +25,12 @@ impl ProfileGeneric {
             sort_object: CosemData::NullData,
             entries_in_use: CosemData::NullData,
             profile_entries: CosemData::NullData,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -95,6 +102,10 @@ impl CosemObject for ProfileGeneric {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

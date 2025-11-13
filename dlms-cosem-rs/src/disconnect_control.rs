@@ -1,11 +1,13 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct DisconnectControl {
     state: CosemData,
     control_mode: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl DisconnectControl {
@@ -13,7 +15,12 @@ impl DisconnectControl {
         Self {
             state: CosemData::NullData,
             control_mode: CosemData::NullData,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -64,6 +71,10 @@ impl CosemObject for DisconnectControl {
             2 => self.remote_reconnect(),
             _ => None,
         }
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 

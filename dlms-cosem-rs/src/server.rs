@@ -103,6 +103,10 @@ impl<T: Transport> Server<T> {
         self.register_object_internal(instance_id, object);
     }
 
+    pub fn handle_frame(&mut self, request_bytes: &[u8]) -> Result<Vec<u8>, ServerError<T::Error>> {
+        self.handle_request(request_bytes)
+    }
+
     fn register_object_internal(&mut self, instance_id: [u8; 6], object: Box<dyn CosemObject>) {
         self.objects.insert(instance_id, object);
         self.rebuild_association_object_list();
@@ -214,17 +218,11 @@ impl<T: Transport> Server<T> {
                                     } else {
                                         aare.result = 1; // failure
                                     }
-                                    Err(_) => aare.result = 1, // failure
                                 }
-                            } else {
-                                aare.result = 1; // failure due to missing challenge
+                                Err(_) => aare.result = 1, // failure
                             }
                         } else {
-                            let mut challenge = vec![0u8; 16];
-                            OsRng.fill_bytes(&mut challenge);
-                            self.lls_challenges
-                                .insert(association_address, challenge.clone());
-                            aare.responding_authentication_value = Some(challenge);
+                            aare.result = 1; // failure due to missing challenge
                         }
                     } else {
                         let mut challenge = vec![0u8; 16];
@@ -279,9 +277,10 @@ impl<T: Transport> Server<T> {
                 };
 
                 let attribute_access = object.attribute_access_rights();
+                let attribute_id = get_req.cosem_attribute_descriptor.attribute_id;
                 if !Self::attribute_operation_allowed(
                     &attribute_access,
-                    get_req.cosem_attribute_descriptor.attribute_id,
+                    attribute_id,
                     AttributeOperation::Read,
                 ) {
                     let denial = GetResponse::Normal(GetResponseNormal {
@@ -290,8 +289,32 @@ impl<T: Transport> Server<T> {
                     });
                     denial.to_bytes()?
                 } else {
-                    let result =
-                        object.get_attribute(get_req.cosem_attribute_descriptor.attribute_id);
+                    if let Some(callbacks) = object.callbacks() {
+                        if let Err(result_code) =
+                            callbacks.call_pre_read(object.as_ref(), attribute_id)
+                        {
+                            let denial = GetResponse::Normal(GetResponseNormal {
+                                invoke_id_and_priority: get_req.invoke_id_and_priority,
+                                result: GetDataResult::DataAccessResult(result_code),
+                            });
+                            return self.build_response_frame(denial.to_bytes()?);
+                        }
+                    }
+
+                    let mut result = object.get_attribute(attribute_id);
+
+                    if let Some(callbacks) = object.callbacks() {
+                        if let Err(result_code) =
+                            callbacks.call_post_read(object.as_ref(), attribute_id, &mut result)
+                        {
+                            let denial = GetResponse::Normal(GetResponseNormal {
+                                invoke_id_and_priority: get_req.invoke_id_and_priority,
+                                result: GetDataResult::DataAccessResult(result_code),
+                            });
+                            return self.build_response_frame(denial.to_bytes()?);
+                        }
+                    }
+
                     let get_res = GetResponse::Normal(GetResponseNormal {
                         invoke_id_and_priority: get_req.invoke_id_and_priority,
                         result: result.map_or(
@@ -325,9 +348,10 @@ impl<T: Transport> Server<T> {
                 };
 
                 let attribute_access = object.attribute_access_rights();
+                let attribute_id = set_req.cosem_attribute_descriptor.attribute_id;
                 if !Self::attribute_operation_allowed(
                     &attribute_access,
-                    set_req.cosem_attribute_descriptor.attribute_id,
+                    attribute_id,
                     AttributeOperation::Write,
                 ) {
                     let denial = SetResponse::Normal(SetResponseNormal {
@@ -336,15 +360,33 @@ impl<T: Transport> Server<T> {
                     });
                     denial.to_bytes()?
                 } else {
-                    let result = object.set_attribute(
-                        set_req.cosem_attribute_descriptor.attribute_id,
-                        set_req.value,
-                    );
+                    let mut value = set_req.value;
+                    if let Some(callbacks) = object.callbacks() {
+                        if let Err(result_code) =
+                            callbacks.call_pre_write(object.as_mut(), attribute_id, &mut value)
+                        {
+                            let denial = SetResponse::Normal(SetResponseNormal {
+                                invoke_id_and_priority: set_req.invoke_id_and_priority,
+                                result: result_code,
+                            });
+                            return self.build_response_frame(denial.to_bytes()?);
+                        }
+                    }
+
+                    let result = object.set_attribute(attribute_id, value.clone());
+                    let response_code = result.map_or(DataAccessResult::ObjectUnavailable, |_| {
+                        if let Some(callbacks) = object.callbacks() {
+                            if let Err(result_code) =
+                                callbacks.call_post_write(object.as_mut(), attribute_id, &value)
+                            {
+                                return result_code;
+                            }
+                        }
+                        DataAccessResult::Success
+                    });
                     let set_res = SetResponse::Normal(SetResponseNormal {
                         invoke_id_and_priority: set_req.invoke_id_and_priority,
-                        result: result.map_or(DataAccessResult::ObjectUnavailable, |_| {
-                            DataAccessResult::Success
-                        }),
+                        result: response_code,
                     });
                     set_res.to_bytes()?
                 }
@@ -375,10 +417,8 @@ impl<T: Transport> Server<T> {
                 };
 
                 let method_access = object.method_access_rights();
-                if !Self::method_operation_allowed(
-                    &method_access,
-                    action_req.cosem_method_descriptor.method_id,
-                ) {
+                let method_id = action_req.cosem_method_descriptor.method_id;
+                if !Self::method_operation_allowed(&method_access, method_id) {
                     let denial = ActionResponse::Normal(ActionResponseNormal {
                         invoke_id_and_priority: action_req.invoke_id_and_priority,
                         single_response: crate::xdlms::ActionResponseWithOptionalData {
@@ -388,12 +428,40 @@ impl<T: Transport> Server<T> {
                     });
                     denial.to_bytes()?
                 } else {
-                    let result = object.invoke_method(
-                        action_req.cosem_method_descriptor.method_id,
-                        action_req
-                            .method_invocation_parameters
-                            .unwrap_or(crate::types::CosemData::NullData),
-                    );
+                    let mut parameters = action_req
+                        .method_invocation_parameters
+                        .unwrap_or(crate::types::CosemData::NullData);
+                    if let Some(callbacks) = object.callbacks() {
+                        if let Err(result_code) =
+                            callbacks.call_pre_action(object.as_mut(), method_id, &mut parameters)
+                        {
+                            let denial = ActionResponse::Normal(ActionResponseNormal {
+                                invoke_id_and_priority: action_req.invoke_id_and_priority,
+                                single_response: crate::xdlms::ActionResponseWithOptionalData {
+                                    result: result_code,
+                                    return_parameters: None,
+                                },
+                            });
+                            return self.build_response_frame(denial.to_bytes()?);
+                        }
+                    }
+
+                    let mut result = object.invoke_method(method_id, parameters);
+
+                    if let Some(callbacks) = object.callbacks() {
+                        if let Err(result_code) =
+                            callbacks.call_post_action(object.as_mut(), method_id, &mut result)
+                        {
+                            let denial = ActionResponse::Normal(ActionResponseNormal {
+                                invoke_id_and_priority: action_req.invoke_id_and_priority,
+                                single_response: crate::xdlms::ActionResponseWithOptionalData {
+                                    result: result_code,
+                                    return_parameters: None,
+                                },
+                            });
+                            return self.build_response_frame(denial.to_bytes()?);
+                        }
+                    }
                     let action_res = ActionResponse::Normal(ActionResponseNormal {
                         invoke_id_and_priority: action_req.invoke_id_and_priority,
                         single_response: crate::xdlms::ActionResponseWithOptionalData {
@@ -430,6 +498,15 @@ impl<T: Transport> Server<T> {
         }
 
         Ok(response_hdlc_frame.to_bytes()?)
+    }
+
+    fn build_response_frame(&self, information: Vec<u8>) -> Result<Vec<u8>, ServerError<T::Error>> {
+        Ok(HdlcFrame {
+            address: self.address,
+            control: 0,
+            information,
+        }
+        .to_bytes()?)
     }
 
     fn negotiate_initiate_response(

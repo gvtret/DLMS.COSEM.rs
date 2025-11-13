@@ -1,6 +1,7 @@
 use crate::cosem::{CosemObjectAttributeId, CosemObjectMethodId};
-use crate::cosem_object::CosemObject;
+use crate::cosem_object::{CosemObject, CosemObjectCallbackHandlers};
 use crate::types::CosemData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ActivityCalendar {
@@ -8,6 +9,7 @@ pub struct ActivityCalendar {
     season_profile: CosemData,
     week_profile: CosemData,
     day_profile: CosemData,
+    callbacks: Arc<CosemObjectCallbackHandlers>,
 }
 
 impl ActivityCalendar {
@@ -17,7 +19,12 @@ impl ActivityCalendar {
             season_profile: CosemData::NullData,
             week_profile: CosemData::NullData,
             day_profile: CosemData::NullData,
+            callbacks: Arc::new(CosemObjectCallbackHandlers::new()),
         }
+    }
+
+    pub fn callback_handlers(&self) -> Arc<CosemObjectCallbackHandlers> {
+        Arc::clone(&self.callbacks)
     }
 }
 
@@ -74,6 +81,10 @@ impl CosemObject for ActivityCalendar {
         _data: CosemData,
     ) -> Option<CosemData> {
         None
+    }
+
+    fn callbacks(&self) -> Option<Arc<CosemObjectCallbackHandlers>> {
+        Some(Arc::clone(&self.callbacks))
     }
 }
 
